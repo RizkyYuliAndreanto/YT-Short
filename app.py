@@ -582,9 +582,18 @@ class YTShortClipperApp(ctk.CTk):
         )
     
     def load_config(self):
-        api_key = self.config.get("api_key", "")
-        base_url = self.config.get("base_url", "https://api.openai.com/v1")
-        model = self.config.get("model", "")
+        # Try new AI providers system first (with .env support)
+        ai_providers = self.config.get_resolved_ai_providers()
+        hf_config = ai_providers.get("highlight_finder", {})
+        api_key = hf_config.get("api_key", "")
+        base_url = hf_config.get("base_url", "https://api.openai.com/v1")
+        model = hf_config.get("model", "")
+        
+        # Fallback to legacy root-level config
+        if not api_key:
+            api_key = self.config.get("api_key", "")
+            base_url = self.config.get("base_url", "https://api.openai.com/v1")
+            model = self.config.get("model", "")
         
         if api_key:
             try:
@@ -646,7 +655,8 @@ class YTShortClipperApp(ctk.CTk):
             self.config.save()
             
             # Update OpenAI client if highlight_finder config changed
-            ai_providers = updated_config.get("ai_providers", {})
+            # Use resolved providers to get API keys from .env
+            ai_providers = self.config.get_resolved_ai_providers()
             hf_config = ai_providers.get("highlight_finder", {})
             if hf_config.get("api_key"):
                 self.client = OpenAI(
@@ -656,7 +666,8 @@ class YTShortClipperApp(ctk.CTk):
     
     def get_youtube_client(self):
         """Get OpenAI client for YouTube title generation"""
-        ai_providers = self.config.get("ai_providers", {})
+        # Use resolved providers to get API keys from .env
+        ai_providers = self.config.get_resolved_ai_providers()
         yt_config = ai_providers.get("youtube_title_maker", {})
         
         if yt_config.get("api_key"):
@@ -985,7 +996,8 @@ class YTShortClipperApp(ctk.CTk):
                 from openai import OpenAI
                 
                 # Validate Highlight Finder (required for all processing)
-                ai_providers = self.config.get("ai_providers", {})
+                # Use resolved providers to get API keys from .env
+                ai_providers = self.config.get_resolved_ai_providers()
                 hf_config = ai_providers.get("highlight_finder", {})
                 hf_api_key = hf_config.get("api_key", "").strip()
                 hf_base_url = hf_config.get("base_url", "https://api.openai.com/v1").strip()
@@ -1126,7 +1138,7 @@ class YTShortClipperApp(ctk.CTk):
                 credit_watermark_settings=credit_watermark_settings,
                 face_tracking_mode=face_tracking_mode,
                 mediapipe_settings=mediapipe_settings,
-                ai_providers=self.config.get("ai_providers"),
+                ai_providers=self.config.get_resolved_ai_providers(),
                 subtitle_language=subtitle_lang,
                 log_callback=log_with_debug,
                 progress_callback=lambda s, p: self.after(0, lambda: self.update_progress(s, p)),
@@ -1241,7 +1253,7 @@ class YTShortClipperApp(ctk.CTk):
                 model=model,
                 temperature=temperature,
                 system_prompt=system_prompt,
-                ai_providers=self.config.get("ai_providers"),
+                ai_providers=self.config.get_resolved_ai_providers(),
                 subtitle_language=subtitle_lang,
                 log_callback=log_with_debug,
                 progress_callback=lambda s, p: self.after(0, lambda: self.update_progress(s, p)),
@@ -1383,7 +1395,7 @@ class YTShortClipperApp(ctk.CTk):
                 credit_watermark_settings=credit_watermark_settings,
                 face_tracking_mode=face_tracking_mode,
                 mediapipe_settings=mediapipe_settings,
-                ai_providers=self.config.get("ai_providers"),
+                ai_providers=self.config.get_resolved_ai_providers(),
                 subtitle_language="id",  # Already downloaded
                 log_callback=log_with_debug,
                 progress_callback=lambda s, p: self.after(0, lambda: self.update_clipping_progress(s, p)),

@@ -3,8 +3,10 @@ AI API Settings Sub-Page - Card-based navigation to individual providers
 """
 
 import customtkinter as ctk
+from tkinter import messagebox
 
 from pages.settings.base_dialog import BaseSettingsSubPage
+from config.ai_provider_config import AI_PROVIDERS_CONFIG
 
 
 class AIAPISettingsSubPage(BaseSettingsSubPage):
@@ -21,13 +23,111 @@ class AIAPISettingsSubPage(BaseSettingsSubPage):
         self.create_content()
     
     def create_content(self):
-        """Create page content with provider cards - NO Provider Type buttons here"""
-        # AI Providers Section only
+        """Create page content with provider cards"""
+        # Quick Provider Switch Section
+        quick_section = self.create_section("Quick Provider Switch")
+        
+        quick_frame = ctk.CTkFrame(quick_section, fg_color="transparent")
+        quick_frame.pack(fill="x", padx=10, pady=(0, 12))
+        
+        ctk.CTkLabel(quick_frame, text="Apply provider to all AI services:", 
+            font=ctk.CTkFont(size=11)).pack(side="left", padx=(0, 10))
+        
+        # Provider buttons
+        btn_frame = ctk.CTkFrame(quick_frame, fg_color="transparent")
+        btn_frame.pack(side="left", padx=5)
+        
+        ctk.CTkButton(btn_frame, text="🚀 GROQ (Free)", width=120,
+            fg_color="#f55036", hover_color="#d44030",
+            command=lambda: self._apply_provider("groq")).pack(side="left", padx=2)
+        
+        ctk.CTkButton(btn_frame, text="🌐 OpenRouter", width=120,
+            fg_color="#6366f1", hover_color="#4f46e5",
+            command=lambda: self._apply_provider("openrouter")).pack(side="left", padx=2)
+        
+        ctk.CTkButton(btn_frame, text="🤖 OpenAI", width=120,
+            fg_color="#10a37f", hover_color="#0d8a6a",
+            command=lambda: self._apply_provider("openai")).pack(side="left", padx=2)
+        
+        # AI Providers Section
         providers_section = self.create_section("AI Providers")
         
         cards_frame = ctk.CTkFrame(providers_section, fg_color="transparent")
         cards_frame.pack(fill="x", padx=10, pady=(0, 12))
         cards_frame.grid_columnconfigure((0, 1), weight=1, uniform="provider")
+        
+        # Row 1
+        self._create_provider_card(cards_frame, 0, 0, "Highlight Finder", 
+            "Find viral moments", "highlight_finder")
+        self._create_provider_card(cards_frame, 0, 1, "Caption Maker", 
+            "Generate captions", "caption_maker")
+        
+        # Row 2
+        self._create_provider_card(cards_frame, 1, 0, "Hook Maker", 
+            "Create TTS hooks", "hook_maker")
+        self._create_provider_card(cards_frame, 1, 1, "Title Generator", 
+            "Generate titles", "youtube_title_maker")
+    
+    def _apply_provider(self, provider_key: str):
+        """Apply selected provider to all AI services"""
+        provider_config = AI_PROVIDERS_CONFIG.get(provider_key)
+        if not provider_config:
+            messagebox.showerror("Error", f"Unknown provider: {provider_key}")
+            return
+        
+        # Provider-specific default models
+        provider_defaults = {
+            "groq": {
+                "highlight_finder": "llama-3.3-70b-versatile",
+                "caption_maker": "whisper-large-v3",
+                "hook_maker": "tts-1",  # GROQ doesn't have TTS, keep placeholder
+                "youtube_title_maker": "llama-3.3-70b-versatile"
+            },
+            "openrouter": {
+                "highlight_finder": "meta-llama/llama-3.3-70b-instruct",
+                "caption_maker": "openai/whisper-large-v3",
+                "hook_maker": "openai/tts-1",
+                "youtube_title_maker": "meta-llama/llama-3.3-70b-instruct"
+            },
+            "openai": {
+                "highlight_finder": "gpt-4.1",
+                "caption_maker": "whisper-1",
+                "hook_maker": "tts-1",
+                "youtube_title_maker": "gpt-4.1"
+            }
+        }
+        
+        defaults = provider_defaults.get(provider_key, {})
+        base_url = provider_config.get("base_url", "https://api.openai.com/v1")
+        
+        # Update all providers
+        ai_providers = self.config.get("ai_providers", {})
+        
+        for service_key in ["highlight_finder", "caption_maker", "hook_maker", "youtube_title_maker"]:
+            if service_key not in ai_providers:
+                ai_providers[service_key] = {}
+            
+            ai_providers[service_key]["base_url"] = base_url
+            ai_providers[service_key]["model"] = defaults.get(service_key, "")
+            # Don't overwrite API key - let user set it via .env or manually
+        
+        # Save config
+        self.config.set("ai_providers", ai_providers)
+        self.on_save_callback({"ai_providers": ai_providers})
+        
+        # Refresh UI
+        self._update_all_statuses()
+        
+        provider_name = provider_config.get("name", provider_key.upper())
+        messagebox.showinfo("Provider Applied", 
+            f"All AI services now use {provider_name}.\n\n"
+            f"Make sure your API key is set in .env file:\n"
+            f"  {provider_key.upper()}_API_KEY=your_key_here")
+    
+    def _update_all_statuses(self):
+        """Update all provider card statuses"""
+        for key in ["highlight_finder", "caption_maker", "hook_maker", "youtube_title_maker"]:
+            self._update_status(key)
         
         # Row 1
         self._create_provider_card(cards_frame, 0, 0, "Highlight Finder", 

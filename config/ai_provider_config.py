@@ -34,10 +34,19 @@ AI_PROVIDERS_CONFIG = {
     "groq": {
         "name": "⚡ Groq",
         "base_url": "https://api.groq.com/openai/v1",
-        "description": "Groq's fast inference API",
-        "default_models": ["mixtral-8x7b-32768", "llama2-70b-4096", "gemma-7b-it"],
-        "api_key_format": "gsk-*",
+        "description": "Groq's fast inference API (FREE tier available)",
+        "default_models": ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768", "gemma2-9b-it"],
+        "api_key_format": "gsk_*",
         "docs_url": "https://console.groq.com/keys",
+        "requires_load": True
+    },
+    "openrouter": {
+        "name": "🌐 OpenRouter",
+        "base_url": "https://openrouter.ai/api/v1",
+        "description": "Access 100+ models from one API (OpenAI, Claude, Llama, etc.)",
+        "default_models": ["openai/gpt-4o", "anthropic/claude-3.5-sonnet", "meta-llama/llama-3.1-70b-instruct", "google/gemini-pro-1.5", "mistralai/mixtral-8x7b-instruct"],
+        "api_key_format": "sk-or-*",
+        "docs_url": "https://openrouter.ai/keys",
         "requires_load": True
     },
     "anthropic": {
@@ -111,7 +120,8 @@ SPECIALIZED_MODELS = {
         "ytclip": ["gpt-4o", "gpt-4-turbo", "gpt-4", "gpt-3.5-turbo"],
         "openai": ["gpt-4o", "gpt-4-turbo", "gpt-4", "gpt-3.5-turbo"],
         "google": ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-pro"],
-        "groq": ["mixtral-8x7b-32768", "llama2-70b-4096"],
+        "groq": ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768"],
+        "openrouter": ["openai/gpt-4o", "anthropic/claude-3.5-sonnet", "meta-llama/llama-3.1-70b-instruct"],
         "anthropic": ["claude-3-5-sonnet-20241022"],
         "cohere": ["command-r-plus", "command-r"],
         "mistral": ["mistral-large-latest"],
@@ -120,19 +130,22 @@ SPECIALIZED_MODELS = {
         "ytclip": ["whisper-1"],
         "openai": ["whisper-1"],  # Special case for whisper
         "google": [],  # Gemini doesn't have whisper equivalent
-        "groq": [],
+        "groq": ["whisper-large-v3"],  # Groq supports whisper
+        "openrouter": [],  # Use OpenAI for whisper
     },
     "hook_maker": {
         "ytclip": ["tts-1-hd", "tts-1"],
         "openai": ["tts-1-hd", "tts-1"],  # TTS models
         "google": [],  # Gemini doesn't have TTS built-in
         "anthropic": [],
+        "openrouter": [],  # Use OpenAI for TTS
     },
     "youtube_title_maker": {
         "ytclip": ["gpt-4o", "gpt-4-turbo", "gpt-4", "gpt-3.5-turbo"],
         "openai": ["gpt-4o", "gpt-4-turbo", "gpt-4", "gpt-3.5-turbo"],
         "google": ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-pro"],
-        "groq": ["mixtral-8x7b-32768"],
+        "groq": ["llama-3.3-70b-versatile", "mixtral-8x7b-32768"],
+        "openrouter": ["openai/gpt-4o", "anthropic/claude-3.5-sonnet", "meta-llama/llama-3.1-70b-instruct"],
         "anthropic": ["claude-3-5-sonnet-20241022"],
     }
 }

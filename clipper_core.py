@@ -1,6 +1,7 @@
 """
 Auto Clipper Core - Processing logic
 Refactored to use OpenAI Whisper API instead of local model
+Optimized for long videos (3-12+ hours)
 """
 
 import subprocess
@@ -12,6 +13,8 @@ import numpy as np
 import tempfile
 import sys
 import time
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from datetime import datetime
 from openai import OpenAI
@@ -133,10 +136,12 @@ class AutoClipperCore:
         self.channel_name = ""  # Will be set after download
         self.face_tracking_mode = face_tracking_mode
         self.mediapipe_settings = mediapipe_settings or {
-            "lip_activity_threshold": 0.15,
-            "switch_threshold": 0.3,
-            "min_shot_duration": 90,
-            "center_weight": 0.3
+            "lip_activity_threshold": 0.12,  # Lower threshold = more sensitive
+            "switch_threshold": 0.25,
+            "min_shot_duration": 60,  # Faster switching for dynamic content
+            "center_weight": 0.5,  # Higher weight = prefer center-frame subjects
+            "face_size_weight": 0.3,  # Prioritize larger/closer faces
+            "upper_body_fallback": True  # Use body detection when face not found
         }
         self.subtitle_language = subtitle_language
         self.log = log_callback or print
@@ -155,6 +160,73 @@ class AutoClipperCore:
         # Create temp directory
         self.temp_dir = self.output_dir / "_temp"
         self.temp_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Checkpoint file for long video processing
+        self.checkpoint_file = self.temp_dir / "processing_checkpoint.json"
+        self.checkpoint_lock = threading.Lock()
+    
+    # ==================== CHECKPOINT SYSTEM ====================
+    # For resuming long video processing (3-12+ hours)
+    
+    def save_checkpoint(self, stage: str, data: dict):
+        """Save processing checkpoint for resume capability"""
+        checkpoint = {
+            "stage": stage,
+            "timestamp": datetime.now().isoformat(),
+            "data": data
+        }
+        with self.checkpoint_lock:
+            try:
+                with open(self.checkpoint_file, 'w', encoding='utf-8') as f:
+                    json.dump(checkpoint, f, indent=2, ensure_ascii=False)
+                self.log(f"  💾 Checkpoint saved: {stage}")
+            except Exception as e:
+                self.log(f"  ⚠ Failed to save checkpoint: {e}")
+    
+    def load_checkpoint(self) -> dict:
+        """Load last checkpoint if exists"""
+        if not self.checkpoint_file.exists():
+            return None
+        
+        try:
+            with open(self.checkpoint_file, 'r', encoding='utf-8') as f:
+                checkpoint = json.load(f)
+            self.log(f"  📂 Found checkpoint: {checkpoint.get('stage', 'unknown')}")
+            return checkpoint
+        except Exception as e:
+            self.log(f"  ⚠ Failed to load checkpoint: {e}")
+            return None
+    
+    def clear_checkpoint(self):
+        """Clear checkpoint after successful completion"""
+        if self.checkpoint_file.exists():
+            try:
+                self.checkpoint_file.unlink()
+                self.log("  🗑️ Checkpoint cleared")
+            except:
+                pass
+    
+    def get_video_duration_from_srt(self, srt_path: str) -> float:
+        """Get video duration from SRT file (last timestamp)"""
+        try:
+            # Read only the last part of file for efficiency
+            file_size = os.path.getsize(srt_path)
+            read_size = min(file_size, 10000)  # Last 10KB should have end timestamp
+            
+            with open(srt_path, 'rb') as f:
+                if file_size > read_size:
+                    f.seek(-read_size, 2)  # Seek from end
+                content = f.read().decode('utf-8', errors='ignore')
+            
+            # Find last timestamp
+            pattern = r'(\d{2}:\d{2}:\d{2},\d{3})'
+            matches = re.findall(pattern, content)
+            if matches:
+                last_timestamp = matches[-1]
+                return self.parse_timestamp(last_timestamp)
+        except:
+            pass
+        return 0
     
     def enable_gpu_acceleration(self, enabled: bool = True):
         """Enable or disable GPU acceleration for video encoding"""
@@ -224,6 +296,16 @@ Prioritaskan segmen dengan karakteristik berikut:
 4. Ada punchline atau momen lucu kuat.
 5. Ada cerita lengkap (setup → buildup → payoff).
 6. Ada kalimat yang bisa berdiri sendiri sebagai hook viral.
+7. Ada FAKTA mengejutkan atau insight baru (untuk dokumenter/edukasi).
+8. Ada momen EMOSIONAL kuat (haru, marah, takjub).
+9. Ada VISUAL storytelling yang kuat (untuk dokumenter/travel).
+
+JENIS KONTEN YANG DIDUKUNG:
+- Podcast: fokus pada statement/punchline/drama
+- Dokumenter: fokus pada fakta mengejutkan/momen emosional
+- Interview: fokus pada confession/insight personal
+- Edukasi: fokus pada tips actionable/aha moment
+- Vlog/Travel: fokus pada momen visual memorable
 
 Hindari:
 
@@ -231,6 +313,7 @@ Hindari:
 * Basa-basi
 * Transisi topik tanpa payoff
 * Penjelasan teknis panjang tanpa emosi
+* Intro/outro yang tidak menambah nilai
 
 Jika harus memilih, utamakan EMOSI & KONFLIK dibanding edukasi netral.
 
@@ -238,12 +321,13 @@ Jika harus memilih, utamakan EMOSI & KONFLIK dibanding edukasi netral.
 ATURAN DURASI (KRITIS – TIDAK BOLEH DILANGGAR)
 ==============================================
 
-* Setiap clip HARUS 60–120 detik.
-* Target ideal: 85–95 detik.
+* Setiap clip HARUS 30–120 detik.
+* Target ideal: 45–90 detik.
 * Hitung durasi dari timestamp transcript.
 * JANGAN estimasi berdasarkan panjang teks.
+* LEBIH BAIK clip pendek yang powerful daripada clip panjang yang membosankan.
 
-Jika durasi < 60 detik:
+Jika durasi < 30 detik:
 → PERPANJANG dengan konteks sebelum atau sesudahnya.
 
 Jika durasi > 120 detik:
@@ -258,11 +342,11 @@ Lakukan salah satu atau kombinasi berikut:
 1. Gabungkan beberapa bagian berurutan yang masih satu topik.
 2. Tambahkan setup sebelum punchline agar dramatis.
 3. Tambahkan payoff setelah cerita agar terasa lengkap.
-4. Pangkas filler tapi jaga minimal 60 detik.
+4. Pangkas filler tapi jaga minimal 30 detik.
 
 DILARANG:
 
-* Menghasilkan clip < 60 detik
+* Menghasilkan clip < 30 detik
 * Mengurangi jumlah clip
 * Mengabaikan timestamp asli
 * Mengarang timestamp
@@ -351,7 +435,7 @@ SELF-VALIDATION (WAJIB SEBELUM RETURN)
 Periksa:
 
 1. Jumlah segment = {num_clips} ?
-2. Semua durasi 60–120 detik ?
+2. Semua durasi 30–120 detik ?
 3. Semua punya tepat 6 field ?
 4. virality_score berupa integer 1–10 ?
 5. Tidak ada field lain ?
@@ -382,11 +466,68 @@ Transcript:
 {transcript}"""
     
     def process(self, url: str, num_clips: int = 5, add_captions: bool = True, add_hook: bool = True):
-        """Main processing pipeline"""
+        """
+        Main processing pipeline with checkpoint support for long videos.
+        Can resume from last checkpoint if processing was interrupted.
+        """
         
-        # Step 1: Download video
-        self.set_progress("Downloading video...", 0.1)
-        video_path, srt_path, video_info = self.download_video(url)
+        # Check for existing checkpoint
+        checkpoint = self.load_checkpoint()
+        video_path = None
+        srt_path = None
+        video_info = None
+        highlights = None
+        start_clip_index = 0
+        
+        if checkpoint and checkpoint.get('data', {}).get('url') == url:
+            stage = checkpoint.get('stage', '')
+            data = checkpoint.get('data', {})
+            
+            if stage == 'downloaded':
+                # Resume from after download
+                video_path = data.get('video_path')
+                srt_path = data.get('srt_path')
+                video_info = data.get('video_info', {})
+                if video_path and Path(video_path).exists():
+                    self.log(f"  📂 Resuming from checkpoint: download complete")
+                else:
+                    checkpoint = None  # File not found, restart
+                    
+            elif stage == 'highlights_found':
+                # Resume from after highlights
+                video_path = data.get('video_path')
+                srt_path = data.get('srt_path')
+                video_info = data.get('video_info', {})
+                highlights = data.get('highlights', [])
+                if video_path and Path(video_path).exists() and highlights:
+                    self.log(f"  📂 Resuming from checkpoint: {len(highlights)} highlights found")
+                else:
+                    checkpoint = None
+                    
+            elif stage == 'clip_processed':
+                # Resume from middle of clip processing
+                video_path = data.get('video_path')
+                srt_path = data.get('srt_path')
+                video_info = data.get('video_info', {})
+                highlights = data.get('highlights', [])
+                start_clip_index = data.get('last_clip_index', 0)
+                if video_path and Path(video_path).exists() and highlights:
+                    self.log(f"  📂 Resuming from checkpoint: clip {start_clip_index}/{len(highlights)}")
+                else:
+                    checkpoint = None
+        
+        # Step 1: Download video (if not resuming)
+        if not video_path:
+            self.set_progress("Downloading video...", 0.1)
+            video_path, srt_path, video_info = self.download_video(url)
+            
+            # Save checkpoint after successful download
+            self.save_checkpoint('downloaded', {
+                'url': url,
+                'video_path': video_path,
+                'srt_path': srt_path,
+                'video_info': video_info
+            })
         
         # Store channel name for credit watermark
         self.channel_name = video_info.get("channel", "") if video_info else ""
@@ -410,10 +551,26 @@ Transcript:
                 f"dalam berbagai bahasa. Pilih yang paling mendekati."
             )
         
-        # Step 2: Find highlights
-        self.set_progress("Finding highlights...", 0.3)
-        transcript = self.parse_srt(srt_path)
-        highlights = self.find_highlights(transcript, video_info, num_clips)
+        # Log video duration for long videos
+        video_duration = self.get_video_duration_from_srt(srt_path)
+        if video_duration > 3600:  # > 1 hour
+            hours = video_duration / 3600
+            self.log(f"  📺 Long video detected: {hours:.1f} hours")
+        
+        # Step 2: Find highlights (if not resuming)
+        if not highlights:
+            self.set_progress("Finding highlights...", 0.3)
+            transcript = self.parse_srt(srt_path)
+            highlights = self.find_highlights(transcript, video_info, num_clips)
+            
+            # Save checkpoint after finding highlights
+            self.save_checkpoint('highlights_found', {
+                'url': url,
+                'video_path': video_path,
+                'srt_path': srt_path,
+                'video_info': video_info,
+                'highlights': highlights
+            })
         
         if self.is_cancelled():
             return
@@ -421,16 +578,31 @@ Transcript:
         if not highlights:
             raise Exception("No valid highlights found!")
         
-        # Step 3: Process each clip
+        # Step 3: Process each clip (with checkpoint per clip)
         total_clips = len(highlights)
-        for i, highlight in enumerate(highlights, 1):
+        for i, highlight in enumerate(highlights[start_clip_index:], start_clip_index + 1):
             if self.is_cancelled():
                 return
+            
             self.process_clip(video_path, highlight, i, total_clips, add_captions=add_captions, add_hook=add_hook)
+            
+            # Save checkpoint after each clip for long videos
+            if video_duration > 3600:
+                self.save_checkpoint('clip_processed', {
+                    'url': url,
+                    'video_path': video_path,
+                    'srt_path': srt_path,
+                    'video_info': video_info,
+                    'highlights': highlights,
+                    'last_clip_index': i
+                })
         
         # Cleanup
         self.set_progress("Cleaning up...", 0.95)
         self.cleanup()
+        
+        # Clear checkpoint on successful completion
+        self.clear_checkpoint()
         
         self.set_progress("Complete!", 1.0)
         self.log(f"\n✅ Created {total_clips} clips in: {self.output_dir}")
@@ -504,6 +676,14 @@ Transcript:
             'quiet': True,
             'no_warnings': False,
             'extract_flat': False,
+            # Network resilience options for unstable connections
+            'retries': 10,  # Retry download on error
+            'fragment_retries': 10,  # Retry failed fragments
+            'file_access_retries': 5,  # Retry file access errors
+            'socket_timeout': 30,  # Timeout for socket operations
+            'http_chunk_size': 1048576,  # 1MB chunks for better resume
+            'noprogress': False,
+            'continuedl': True,  # Continue partial downloads
         }
         
         # Add Deno JS runtime if available
@@ -740,6 +920,12 @@ Transcript:
                 self.ytdlp_path,
                 "-f", format_selector,
                 "--format-sort", "res,br",
+                # Network resilience options
+                "--retries", "10",
+                "--fragment-retries", "10",
+                "--file-access-retries", "5",
+                "--socket-timeout", "30",
+                "--http-chunk-size", "1M",
                 *base_args,
                 *strategy["extra_args"],
                 "--write-sub", "--write-auto-sub",
@@ -1144,7 +1330,98 @@ Transcript:
             return {"error": str(e), "subtitles": [], "automatic_captions": []}
     
     def parse_srt(self, srt_path: str) -> str:
-        """Parse SRT to text with timestamps"""
+        """Parse SRT to text with timestamps - keeps both start/end for duration calculation"""
+        return self.parse_srt_streaming(srt_path)
+    
+    def parse_srt_streaming(self, srt_path: str, chunk_size: int = 8192) -> str:
+        """
+        Memory-efficient streaming SRT parser for very long videos (3-12+ hours).
+        Reads file in chunks instead of loading entire file into memory.
+        """
+        lines = []
+        prev_start = None
+        prev_end = None
+        accumulated_text = []
+        
+        # Buffer for incomplete blocks
+        buffer = ""
+        pattern = re.compile(r"(\d+)\n(\d{2}:\d{2}:\d{2},\d{3}) --> (\d{2}:\d{2}:\d{2},\d{3})\n(.*?)(?=\n\n|\Z)", re.DOTALL)
+        
+        file_size = os.path.getsize(srt_path)
+        processed = 0
+        
+        with open(srt_path, "r", encoding="utf-8") as f:
+            while True:
+                chunk = f.read(chunk_size)
+                if not chunk:
+                    break
+                
+                processed += len(chunk)
+                buffer += chunk
+                
+                # Find complete subtitle blocks (ending with double newline)
+                last_complete = buffer.rfind('\n\n')
+                if last_complete == -1:
+                    continue
+                
+                # Process complete portion
+                complete_portion = buffer[:last_complete + 2]
+                buffer = buffer[last_complete + 2:]
+                
+                matches = pattern.findall(complete_portion)
+                
+                for idx, start, end, text in matches:
+                    clean_text = text.replace("\n", " ").strip()
+                    start_short = start.split(',')[0]
+                    end_short = end.split(',')[0]
+                    
+                    if prev_start is None:
+                        prev_start = start_short
+                        prev_end = end_short
+                        accumulated_text = [clean_text]
+                    elif len(' '.join(accumulated_text)) < 150:
+                        accumulated_text.append(clean_text)
+                        prev_end = end_short
+                    else:
+                        lines.append(f"[{prev_start}→{prev_end}] {' '.join(accumulated_text)}")
+                        prev_start = start_short
+                        prev_end = end_short
+                        accumulated_text = [clean_text]
+                
+                # Log progress for very long files
+                if file_size > 1000000 and processed % (chunk_size * 100) == 0:
+                    progress = (processed / file_size) * 100
+                    self.log(f"    Parsing SRT: {progress:.1f}%")
+        
+        # Process remaining buffer
+        if buffer.strip():
+            matches = pattern.findall(buffer)
+            for idx, start, end, text in matches:
+                clean_text = text.replace("\n", " ").strip()
+                start_short = start.split(',')[0]
+                end_short = end.split(',')[0]
+                
+                if prev_start is None:
+                    prev_start = start_short
+                    prev_end = end_short
+                    accumulated_text = [clean_text]
+                elif len(' '.join(accumulated_text)) < 150:
+                    accumulated_text.append(clean_text)
+                    prev_end = end_short
+                else:
+                    lines.append(f"[{prev_start}→{prev_end}] {' '.join(accumulated_text)}")
+                    prev_start = start_short
+                    prev_end = end_short
+                    accumulated_text = [clean_text]
+        
+        # Don't forget last segment
+        if accumulated_text:
+            lines.append(f"[{prev_start}→{prev_end}] {' '.join(accumulated_text)}")
+        
+        return "\n".join(lines)
+    
+    def parse_srt_full(self, srt_path: str) -> str:
+        """Parse SRT with full timestamps (for backward compatibility)"""
         with open(srt_path, "r", encoding="utf-8") as f:
             content = f.read()
         
@@ -1157,6 +1434,210 @@ Transcript:
             lines.append(f"[{start} - {end}] {clean_text}")
         
         return "\n".join(lines)
+    
+    def estimate_token_count(self, text: str) -> int:
+        """Rough estimate of token count (1 token ≈ 4 chars for English/Indonesian)"""
+        return len(text) // 4
+    
+    def chunk_transcript(self, transcript: str, max_tokens: int = 8000) -> list:
+        """
+        Split transcript into chunks that fit within token limit.
+        Optimized for very long videos (3-12+ hours).
+        
+        Args:
+            transcript: Full transcript text
+            max_tokens: Maximum tokens per chunk (default 8000 for GROQ free tier safety)
+        
+        Returns:
+            List of transcript chunks with overlap for context
+        """
+        lines = transcript.split('\n')
+        total_lines = len(lines)
+        chunks = []
+        current_chunk = []
+        current_tokens = 0
+        
+        # Track timestamps for chunk metadata
+        chunk_start_time = None
+        chunk_end_time = None
+        
+        for line in lines:
+            line_tokens = self.estimate_token_count(line)
+            
+            # Extract timestamp from line for metadata
+            time_match = re.match(r'\[(\d{2}:\d{2}:\d{2})', line)
+            if time_match:
+                if chunk_start_time is None:
+                    chunk_start_time = time_match.group(1)
+                chunk_end_time = time_match.group(1)
+            
+            if current_tokens + line_tokens > max_tokens and current_chunk:
+                # Add chunk with timestamp metadata as header
+                if chunk_start_time and chunk_end_time:
+                    chunk_header = f"[CHUNK: {chunk_start_time} - {chunk_end_time}]\n"
+                else:
+                    chunk_header = ""
+                chunks.append(chunk_header + '\n'.join(current_chunk))
+                
+                # Keep last 5 lines for better context overlap
+                overlap = current_chunk[-5:] if len(current_chunk) >= 5 else current_chunk
+                current_chunk = overlap.copy()
+                current_tokens = sum(self.estimate_token_count(l) for l in current_chunk)
+                
+                # Reset timestamps for next chunk (but keep end time for overlap context)
+                chunk_start_time = None
+                
+            current_chunk.append(line)
+            current_tokens += line_tokens
+        
+        # Add remaining chunk
+        if current_chunk:
+            if chunk_start_time and chunk_end_time:
+                chunk_header = f"[CHUNK: {chunk_start_time} - {chunk_end_time}]\n"
+            else:
+                chunk_header = ""
+            chunks.append(chunk_header + '\n'.join(current_chunk))
+        
+        return chunks
+    
+    def chunk_transcript_streaming(self, srt_path: str, max_tokens: int = 6000):
+        """
+        Generator-based chunking directly from SRT file.
+        Most memory-efficient for very long videos.
+        Yields chunks one at a time instead of loading all into memory.
+        """
+        current_chunk = []
+        current_tokens = 0
+        chunk_start_time = None
+        chunk_end_time = None
+        
+        # Stream parse SRT
+        buffer = ""
+        pattern = re.compile(r"(\d+)\n(\d{2}:\d{2}:\d{2},\d{3}) --> (\d{2}:\d{2}:\d{2},\d{3})\n(.*?)(?=\n\n|\Z)", re.DOTALL)
+        
+        with open(srt_path, "r", encoding="utf-8") as f:
+            for raw_line in f:
+                buffer += raw_line
+                
+                # Process when we have complete blocks
+                if '\n\n' in buffer:
+                    last_complete = buffer.rfind('\n\n')
+                    complete = buffer[:last_complete + 2]
+                    buffer = buffer[last_complete + 2:]
+                    
+                    matches = pattern.findall(complete)
+                    
+                    for idx, start, end, text in matches:
+                        clean_text = text.replace("\n", " ").strip()
+                        start_short = start.split(',')[0]
+                        end_short = end.split(',')[0]
+                        
+                        line = f"[{start_short}→{end_short}] {clean_text}"
+                        line_tokens = self.estimate_token_count(line)
+                        
+                        if chunk_start_time is None:
+                            chunk_start_time = start_short
+                        chunk_end_time = end_short
+                        
+                        if current_tokens + line_tokens > max_tokens and current_chunk:
+                            # Yield chunk
+                            header = f"[CHUNK: {chunk_start_time} - {chunk_end_time}]\n"
+                            yield header + '\n'.join(current_chunk)
+                            
+                            # Reset with overlap
+                            overlap = current_chunk[-5:] if len(current_chunk) >= 5 else current_chunk
+                            current_chunk = overlap.copy()
+                            current_tokens = sum(self.estimate_token_count(l) for l in current_chunk)
+                            chunk_start_time = None
+                        
+                        current_chunk.append(line)
+                        current_tokens += line_tokens
+        
+        # Process remaining buffer
+        if buffer.strip():
+            matches = pattern.findall(buffer)
+            for idx, start, end, text in matches:
+                clean_text = text.replace("\n", " ").strip()
+                start_short = start.split(',')[0]
+                end_short = end.split(',')[0]
+                
+                line = f"[{start_short}→{end_short}] {clean_text}"
+                current_chunk.append(line)
+                if chunk_start_time is None:
+                    chunk_start_time = start_short
+                chunk_end_time = end_short
+        
+        # Yield final chunk
+        if current_chunk:
+            header = f"[CHUNK: {chunk_start_time} - {chunk_end_time}]\n" if chunk_start_time else ""
+            yield header + '\n'.join(current_chunk)
+    
+    def get_compact_prompt(self) -> str:
+        """
+        Get a compact system prompt optimized for low token usage.
+        ~60% smaller than the full prompt while maintaining quality.
+        """
+        return """Kamu editor short-form untuk konten viral (TikTok/Reels/Shorts).
+
+TUGAS: Dari transcript, hasilkan TEPAT {num_clips} segment viral.
+
+FORMAT TRANSCRIPT:
+[HH:MM:SS→HH:MM:SS] teks dialog
+Contoh: [00:05:00→00:05:30] Halo semua...
+
+⚠️ ATURAN DURASI WAJIB (KRITIS - TIDAK BOLEH DILANGGAR):
+- Setiap clip HARUS berdurasi 60-120 DETIK (1-2 menit)
+- HITUNG: end_time - start_time harus 60-120 detik
+- Lihat timestamp di transcript untuk memilih range yang tepat
+
+CONTOH PERHITUNGAN DURASI:
+✓ BENAR: start="00:02:00,000" end="00:03:30,000" = 90 detik (1.5 menit)
+✓ BENAR: start="00:10:00,000" end="00:11:15,000" = 75 detik 
+✗ SALAH: start="00:05:00,000" end="00:05:15,000" = 15 detik (TERLALU PENDEK!)
+✗ SALAH: start="00:05:00,000" end="00:05:30,000" = 30 detik (TERLALU PENDEK!)
+
+JIKA KONTEN MENARIK TAPI PENDEK:
+→ GABUNGKAN dengan bagian sebelum/sesudahnya sampai 30+ detik
+→ Cari timestamp mulai dari 30-60 DETIK sebelum punchline
+
+PRIORITAS KONTEN:
+1. Konflik/kontroversi/drama
+2. Pengakuan personal/curhat
+3. Statement tajam/kontroversial
+4. Momen lucu/punchline kuat
+5. Cerita lengkap (setup→konflik→payoff)
+6. Fakta mengejutkan/insight baru (dokumenter)
+7. Momen emosional kuat (haru/marah/takjub)
+
+JENIS KONTEN: Podcast, Dokumenter, Interview, Edukasi, Vlog
+
+PRIORITAS KONTEN:
+1. Konflik/kontroversi
+2. Pengakuan personal  
+3. Statement tajam
+4. Momen lucu
+5. Cerita lengkap (setup→payoff)
+6. Fakta mengejutkan (dokumenter)
+7. Momen emosional kuat
+
+OUTPUT: HANYA JSON array, tanpa markdown/penjelasan.
+
+FORMAT (6 field wajib):
+- "start_time": "HH:MM:SS,000" (dengan milidetik)
+- "end_time": "HH:MM:SS,000" (dengan milidetik)
+- "title": max 60 karakter
+- "description": max 150 karakter  
+- "virality_score": integer 1-10
+- "hook_text": max 15 kata, sebut NAMA pembicara
+
+VALIDASI SEBELUM OUTPUT:
+✓ Semua clip 30-120 detik?
+✓ Ada tepat {num_clips} segment?
+
+{video_context}
+
+Transcript:
+{transcript}"""
     
     def _call_gemini_api(self, prompt: str) -> str:
         """Call Google Gemini API directly (not via OpenAI SDK)"""
@@ -1185,9 +1666,27 @@ Transcript:
             raise
     
     def find_highlights(self, transcript: str, video_info: dict, num_clips: int) -> list:
-        """Find highlights using GPT or Gemini"""
+        """Find highlights using GPT or Gemini - with automatic chunking for long transcripts"""
         self.log(f"[2/4] Finding highlights (using {self.model})...")
         
+        # Estimate token count
+        estimated_tokens = self.estimate_token_count(transcript)
+        self.log(f"  📊 Estimated transcript tokens: {estimated_tokens}")
+        
+        # Check if we need chunking (GROQ free tier limit: 12000 TPM)
+        # Use 8000 as threshold to leave room for prompt + response
+        use_chunking = estimated_tokens > 8000
+        use_compact_prompt = estimated_tokens > 5000
+        
+        if use_chunking:
+            self.log(f"  📦 Using chunked processing for long transcript")
+            return self._find_highlights_chunked(transcript, video_info, num_clips)
+        
+        # For shorter transcripts, use standard processing
+        return self._find_highlights_single(transcript, video_info, num_clips, use_compact_prompt)
+    
+    def _find_highlights_single(self, transcript: str, video_info: dict, num_clips: int, use_compact: bool = False) -> list:
+        """Process a single transcript (not chunked)"""
         request_clips = num_clips + 3
         
         video_context = ""
@@ -1195,83 +1694,202 @@ Transcript:
             video_context = f"""INFO VIDEO:
 - Judul: {video_info.get('title', 'Unknown')}
 - Channel: {video_info.get('channel', 'Unknown')}
-- Deskripsi: {video_info.get('description', '')[:500]}"""
+- Deskripsi: {video_info.get('description', '')[:300]}"""
         
-        # Replace placeholders safely (avoid .format() which breaks on user's curly braces)
-        prompt = self.system_prompt.replace("{num_clips}", str(request_clips))
+        # Choose prompt based on token budget
+        base_prompt = self.get_compact_prompt() if use_compact else self.system_prompt
+        
+        # Replace placeholders safely
+        prompt = base_prompt.replace("{num_clips}", str(request_clips))
         prompt = prompt.replace("{video_context}", video_context)
         prompt = prompt.replace("{transcript}", transcript)
         
-        # Warn if required placeholders are missing
-        if "{transcript}" in self.system_prompt and "{transcript}" in prompt:
-            self.log("  ⚠ Warning: {transcript} placeholder not replaced - check your system prompt")
-        if "{num_clips}" in self.system_prompt and "{num_clips}" in prompt:
-            self.log("  ⚠ Warning: {num_clips} placeholder not replaced - check your system prompt")
-
+        result = self._call_ai_api(prompt)
+        return self._parse_highlights_result(result, num_clips)
+    
+    def _find_highlights_chunked(self, transcript: str, video_info: dict, num_clips: int) -> list:
+        """
+        Process long transcript in chunks with parallel API calls.
+        Optimized for videos 3-12+ hours.
+        """
+        chunks = self.chunk_transcript(transcript, max_tokens=6000)
+        num_chunks = len(chunks)
+        self.log(f"  📦 Split into {num_chunks} chunks")
+        
+        # Smart clip distribution: more clips from beginning/end (typically more interesting)
+        # For very long videos, distribute evenly but request more per chunk
+        if num_chunks <= 3:
+            clips_per_chunk = max(3, (num_clips + 3) // num_chunks + 1)
+        elif num_chunks <= 10:
+            clips_per_chunk = max(2, (num_clips + 5) // num_chunks + 1)
+        else:
+            # Very long video (>10 chunks): request fewer per chunk but more total
+            clips_per_chunk = max(2, (num_clips * 2) // num_chunks + 1)
+        
+        self.log(f"  📊 Requesting {clips_per_chunk} clips per chunk (total: ~{clips_per_chunk * num_chunks})")
+        
+        video_context = ""
+        if video_info:
+            video_context = f"""INFO VIDEO:
+- Judul: {video_info.get('title', 'Unknown')}
+- Channel: {video_info.get('channel', 'Unknown')}"""
+        
+        all_highlights = []
+        failed_chunks = []
+        
+        # Determine max parallel workers (limit to avoid rate limiting)
+        max_workers = min(3, num_chunks)  # Max 3 parallel API calls
+        
+        def process_chunk(chunk_data):
+            """Process a single chunk"""
+            i, chunk = chunk_data
+            prompt = self.get_compact_prompt()
+            prompt = prompt.replace("{num_clips}", str(clips_per_chunk))
+            prompt = prompt.replace("{video_context}", video_context)
+            prompt = prompt.replace("{transcript}", chunk)
+            
+            try:
+                result = self._call_ai_api(prompt)
+                highlights = self._parse_highlights_result(result, clips_per_chunk, silent=True)
+                return (i, highlights, None)
+            except Exception as e:
+                return (i, [], str(e)[:100])
+        
+        # Use parallel processing for faster results
+        if num_chunks > 1 and max_workers > 1:
+            self.log(f"  ⚡ Using parallel processing ({max_workers} workers)...")
+            
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                # Submit all chunks
+                futures = {executor.submit(process_chunk, (i, chunk)): i 
+                          for i, chunk in enumerate(chunks)}
+                
+                # Collect results as they complete
+                completed = 0
+                for future in as_completed(futures):
+                    completed += 1
+                    idx, highlights, error = future.result()
+                    
+                    if error:
+                        failed_chunks.append(idx)
+                        self.log(f"    ⚠ Chunk {idx+1} failed: {error}")
+                    else:
+                        all_highlights.extend(highlights)
+                        self.log(f"    ✓ Chunk {idx+1}: {len(highlights)} highlights ({completed}/{num_chunks})")
+        else:
+            # Sequential processing for single chunk
+            for i, chunk in enumerate(chunks):
+                if self.is_cancelled():
+                    raise Exception("Cancelled by user")
+                
+                self.log(f"  🔍 Processing chunk {i+1}/{num_chunks}...")
+                idx, highlights, error = process_chunk((i, chunk))
+                
+                if error:
+                    failed_chunks.append(idx)
+                    self.log(f"    ⚠ Chunk {i+1} failed: {error}")
+                else:
+                    all_highlights.extend(highlights)
+                    self.log(f"    ✓ Found {len(highlights)} highlights")
+        
+        if not all_highlights:
+            raise Exception(f"Failed to find any highlights from all {num_chunks} chunks")
+        
+        self.log(f"  📊 Raw highlights: {len(all_highlights)} (from {num_chunks - len(failed_chunks)} chunks)")
+        
+        # Sort by virality score and timestamp
+        all_highlights.sort(key=lambda x: (-x.get('virality_score', 0), x.get('start_time', '')))
+        
+        # Advanced deduplication: remove overlapping timestamps
+        unique_highlights = self._deduplicate_highlights(all_highlights)
+        
+        self.log(f"  ✓ Final unique highlights: {len(unique_highlights)}")
+        return unique_highlights[:num_clips]
+    
+    def _deduplicate_highlights(self, highlights: list, min_gap_seconds: int = 60) -> list:
+        """
+        Remove duplicate/overlapping highlights.
+        Keeps higher virality_score when timestamps overlap.
+        """
+        if not highlights:
+            return []
+        
+        unique = []
+        for h in highlights:
+            try:
+                start = self.parse_timestamp(h.get('start_time', '00:00:00,000'))
+                end = self.parse_timestamp(h.get('end_time', '00:00:00,000'))
+            except:
+                continue
+            
+            is_duplicate = False
+            for existing in unique:
+                try:
+                    ex_start = self.parse_timestamp(existing.get('start_time', '00:00:00,000'))
+                    ex_end = self.parse_timestamp(existing.get('end_time', '00:00:00,000'))
+                except:
+                    continue
+                
+                # Check for overlap or too close
+                # Overlap: start is within existing range, or existing start is within this range
+                overlaps = (ex_start <= start <= ex_end) or (start <= ex_start <= end)
+                too_close = abs(start - ex_start) < min_gap_seconds
+                
+                if overlaps or too_close:
+                    is_duplicate = True
+                    break
+            
+            if not is_duplicate:
+                unique.append(h)
+        
+        return unique
+    
+    def _call_ai_api(self, prompt: str) -> str:
+        """Call AI API (Gemini or OpenAI-compatible)"""
         # Check if using Google Gemini
         if "gemini" in self.model.lower() and GOOGLE_GENAI_AVAILABLE:
-            result = self._call_gemini_api(prompt)
-        else:
-            # Use OpenAI SDK for OpenAI, Groq, Anthropic, etc.
-            try:
-                response = self.highlight_client.chat.completions.create(
-                    model=self.model,
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=self.temperature,
-                )
-                
-                # Validate response structure
-                if not response:
-                    raise Exception("API returned empty response")
-                
-                if not hasattr(response, 'choices') or not response.choices:
-                    # Log response structure for debugging
-                    self.log(f"  ⚠ Unexpected API response structure: {type(response)}")
-                    self.log(f"  Response attributes: {dir(response)}")
-                    raise Exception(
-                        "API response missing 'choices' field.\n\n"
-                        "This usually happens with custom API providers that don't follow OpenAI format.\n\n"
-                        "Please check:\n"
-                        "1. API key is valid and has credits\n"
-                        "2. Base URL is correct for your provider\n"
-                        "3. Model name is supported by your provider\n"
-                        "4. Provider follows OpenAI-compatible API format"
-                    )
-                
-                if not response.choices[0].message or not response.choices[0].message.content:
-                    raise Exception(
-                        "API returned empty content.\n\n"
-                        "Possible causes:\n"
-                        "1. Model refused to generate content (content filter)\n"
-                        "2. API quota exceeded\n"
-                        "3. Model doesn't support this type of request"
-                    )
-                
-                # Report token usage (input and output separately)
-                if hasattr(response, 'usage') and response.usage:
-                    self.report_tokens(response.usage.prompt_tokens, response.usage.completion_tokens, 0, 0)
-                
-                result = response.choices[0].message.content.strip()
-                
-            except Exception as e:
-                # Check if it's our custom exception
-                if "API response missing" in str(e) or "API returned empty" in str(e):
-                    raise
-                
-                # Otherwise, wrap with more context
-                self.log(f"  ❌ API Error: {e}")
-                raise Exception(
-                    f"Failed to get highlights from AI model.\n\n"
-                    f"Error: {str(e)}\n\n"
-                    f"Please check:\n"
-                    f"1. API key is valid: {self.highlight_client.api_key[:20]}...\n"
-                    f"2. Base URL is correct: {self.highlight_client.base_url}\n"
-                    f"3. Model exists: {self.model}\n"
-                    f"4. You have sufficient credits/quota"
-                )
+            return self._call_gemini_api(prompt)
         
-        # Log raw response for debugging
-        self.log(f"  Raw AI response (first 500 chars):\n{result[:500]}")
+        # Use OpenAI SDK for OpenAI, Groq, Anthropic, etc.
+        try:
+            response = self.highlight_client.chat.completions.create(
+                model=self.model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=self.temperature,
+            )
+            
+            if not response:
+                raise Exception("API returned empty response")
+            
+            if not hasattr(response, 'choices') or not response.choices:
+                self.log(f"  ⚠ Unexpected API response structure: {type(response)}")
+                raise Exception("API response missing 'choices' field.")
+            
+            if not response.choices[0].message or not response.choices[0].message.content:
+                raise Exception("API returned empty content.")
+            
+            # Report token usage
+            if hasattr(response, 'usage') and response.usage:
+                self.report_tokens(response.usage.prompt_tokens, response.usage.completion_tokens, 0, 0)
+            
+            return response.choices[0].message.content.strip()
+            
+        except Exception as e:
+            self.log(f"  ❌ API Error: {e}")
+            raise Exception(
+                f"Failed to get highlights from AI model.\n\n"
+                f"Error: {str(e)}\n\n"
+                f"Please check:\n"
+                f"1. API key is valid: {self.highlight_client.api_key[:20]}...\n"
+                f"2. Base URL is correct: {self.highlight_client.base_url}\n"
+                f"3. Model exists: {self.model}\n"
+                f"4. You have sufficient credits/quota"
+            )
+    
+    def _parse_highlights_result(self, result: str, num_clips: int, silent: bool = False) -> list:
+        """Parse AI response into highlights list"""
+        if not silent:
+            self.log(f"  Raw AI response (first 500 chars):\n{result[:500]}")
         
         if result.startswith("```"):
             result = re.sub(r"```json?\n?", "", result)
@@ -1280,11 +1898,10 @@ Transcript:
         try:
             highlights = json.loads(result)
         except json.JSONDecodeError as e:
-            # Log full response on error
-            self.log(f"\n❌ JSON Parse Error: {e}")
-            self.log(f"\n📄 Full GPT Response:\n{result}")
-            self.log(f"\n💡 Error position: line {e.lineno}, column {e.colno}")
-            raise Exception(f"Failed to parse GPT response as JSON: {e}\n\nFull response logged above.")
+            if not silent:
+                self.log(f"\n❌ JSON Parse Error: {e}")
+                self.log(f"\n📄 Full GPT Response:\n{result}")
+            raise Exception(f"Failed to parse GPT response as JSON: {e}")
         
         # Filter by duration (min 58s, max 120s)
         valid = []
@@ -1292,38 +1909,29 @@ Transcript:
             # Fallback: convert "reason" to "description" if exists
             if "reason" in h and "description" not in h:
                 h["description"] = h.pop("reason")
-                self.log(f"  ⚠ Converted 'reason' to 'description' for '{h.get('title', 'Unknown')}'")
             
-            duration = self.parse_timestamp(h["end_time"]) - self.parse_timestamp(h["start_time"])
-            h["duration_seconds"] = round(duration, 1)
+            try:
+                duration = self.parse_timestamp(h["end_time"]) - self.parse_timestamp(h["start_time"])
+                h["duration_seconds"] = round(duration, 1)
+            except:
+                continue
             
-            # Ensure virality_score exists (default to 5 if missing)
+            # Ensure required fields exist
             if "virality_score" not in h:
                 h["virality_score"] = 5
-                self.log(f"  ⚠ Missing virality_score for '{h.get('title', 'Unknown')}', defaulting to 5")
-            
-            # Ensure description exists
             if "description" not in h:
                 h["description"] = h.get("title", "No description")
-                self.log(f"  ⚠ Missing description for '{h.get('title', 'Unknown')}', using title")
             
             if 58 <= duration <= 120:
                 valid.append(h)
-                virality = h.get("virality_score", 5)
-                self.log(f"  ✓ {h['title']} ({duration:.0f}s) [🔥 {virality}/10]")
-            elif duration > 120:
-                self.log(f"  ✗ {h['title']} ({duration:.0f}s) - Too long, skipped")
-            elif duration < 58:
-                self.log(f"  ✗ {h['title']} ({duration:.0f}s) - Too short, skipped")
-            
-            if len(valid) >= num_clips:
-                break
-        
-        # If we don't have enough valid clips, warn user
-        if len(valid) < num_clips:
-            self.log(f"\n⚠️ WARNING: Only found {len(valid)} valid clips out of {num_clips} requested!")
-            self.log(f"   AI returned many segments that were too short (< 58s).")
-            self.log(f"   Consider using a better AI model or adjusting the prompt.")
+                if not silent:
+                    virality = h.get("virality_score", 5)
+                    self.log(f"  ✓ {h['title']} ({duration:.0f}s) [🔥 {virality}/10]")
+            elif not silent:
+                if duration > 120:
+                    self.log(f"  ✗ {h['title']} ({duration:.0f}s) - Too long, skipped")
+                elif duration < 58:
+                    self.log(f"  ✗ {h['title']} ({duration:.0f}s) - Too short, skipped")
         
         return valid[:num_clips]
     
@@ -1614,14 +2222,25 @@ Transcript:
         crop_h = orig_h
         out_w, out_h = 1080, 1920
         
-        # Face detector
-        face_cascade = cv2.CascadeClassifier(
+        # Multiple face detectors for better coverage
+        face_cascade_frontal = cv2.CascadeClassifier(
             cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
+        )
+        face_cascade_profile = cv2.CascadeClassifier(
+            cv2.data.haarcascades + 'haarcascade_profileface.xml'
+        )
+        # Upper body detector as fallback
+        upper_body_cascade = cv2.CascadeClassifier(
+            cv2.data.haarcascades + 'haarcascade_upperbody.xml'
         )
         
         # First pass: analyze frames
         crop_positions = []
         current_target = orig_w / 2
+        face_not_found_count = 0
+        center_weight = self.mediapipe_settings.get("center_weight", 0.5)
+        
+        self.log(f"  Analyzing {total_frames} frames for subject detection...")
         
         while True:
             ret, frame = cap.read()
@@ -1629,12 +2248,54 @@ Transcript:
                 break
             
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            faces = face_cascade.detectMultiScale(gray, 1.1, 5, minSize=(50, 50))
+            
+            # Try frontal face first
+            faces = face_cascade_frontal.detectMultiScale(gray, 1.1, 4, minSize=(60, 60))
+            
+            # If no frontal face, try profile face
+            if len(faces) == 0:
+                faces = face_cascade_profile.detectMultiScale(gray, 1.1, 4, minSize=(60, 60))
+            
+            # If still no face, try upper body detection
+            if len(faces) == 0 and self.mediapipe_settings.get("upper_body_fallback", True):
+                bodies = upper_body_cascade.detectMultiScale(gray, 1.1, 3, minSize=(100, 100))
+                if len(bodies) > 0:
+                    # Convert body detection to face-like coordinates (upper part of body)
+                    faces = []
+                    for (x, y, w, h) in bodies:
+                        # Focus on upper 40% of body (head/face area)
+                        face_h = int(h * 0.4)
+                        faces.append((x, y, w, face_h))
+                    faces = np.array(faces)
             
             if len(faces) > 0:
-                # Find largest face
-                largest = max(faces, key=lambda f: f[2] * f[3])
-                current_target = largest[0] + largest[2] / 2
+                face_not_found_count = 0
+                
+                # Score each face: combine size + center position
+                best_score = -1
+                best_target = current_target
+                
+                for (x, y, w, h) in faces:
+                    face_center_x = x + w / 2
+                    face_area = w * h
+                    
+                    # Normalize scores
+                    size_score = face_area / (orig_w * orig_h)  # Bigger = better
+                    center_score = 1.0 - abs(face_center_x - orig_w / 2) / (orig_w / 2)  # Center = better
+                    
+                    # Combined score with configurable center weight
+                    combined_score = (size_score * (1 - center_weight)) + (center_score * center_weight)
+                    
+                    if combined_score > best_score:
+                        best_score = combined_score
+                        best_target = face_center_x
+                
+                current_target = best_target
+            else:
+                face_not_found_count += 1
+                # After 30 frames without face, slowly drift to center
+                if face_not_found_count > 30:
+                    current_target = current_target * 0.95 + (orig_w / 2) * 0.05
             
             crop_x = int(current_target - crop_w / 2)
             crop_x = max(0, min(crop_x, orig_w - crop_w))
@@ -1766,22 +2427,23 @@ Transcript:
         out_w, out_h = 1080, 1920
         
         # MediaPipe Face Mesh settings
-        lip_threshold = self.mediapipe_settings.get("lip_activity_threshold", 0.15)
-        switch_threshold = self.mediapipe_settings.get("switch_threshold", 0.3)
-        min_shot_duration = self.mediapipe_settings.get("min_shot_duration", 90)
-        center_weight = self.mediapipe_settings.get("center_weight", 0.3)
+        lip_threshold = self.mediapipe_settings.get("lip_activity_threshold", 0.12)
+        switch_threshold = self.mediapipe_settings.get("switch_threshold", 0.25)
+        min_shot_duration = self.mediapipe_settings.get("min_shot_duration", 60)
+        center_weight = self.mediapipe_settings.get("center_weight", 0.5)
+        face_size_weight = self.mediapipe_settings.get("face_size_weight", 0.3)
         
         # First pass: analyze frames with MediaPipe
-        self.log("  Pass 1: Analyzing lip movements...")
+        self.log("  Pass 1: Analyzing faces and lip movements...")
         crop_positions = []
         face_activities = []  # Store activity scores per frame
         
         with self.mp_face_mesh.FaceMesh(
             static_image_mode=False,
-            max_num_faces=3,
+            max_num_faces=5,  # Support up to 5 faces for group content
             refine_landmarks=True,
-            min_detection_confidence=0.5,
-            min_tracking_confidence=0.5
+            min_detection_confidence=0.4,  # Lower threshold for better detection
+            min_tracking_confidence=0.4
         ) as face_mesh:
             
             frame_count = 0
@@ -1815,16 +2477,34 @@ Transcript:
                             prev_lip_distances.get(face_id, None)
                         )
                         
-                        # Get face center position
-                        face_x = face_landmarks.landmark[1].x * orig_w  # Nose tip
+                        # Get face center position (nose tip)
+                        face_x = face_landmarks.landmark[1].x * orig_w
                         
-                        # Calculate combined score (activity + center position)
+                        # Calculate face bounding box for size estimation
+                        # Use landmarks: forehead (10), chin (152), left cheek (234), right cheek (454)
+                        forehead = face_landmarks.landmark[10]
+                        chin = face_landmarks.landmark[152]
+                        left_cheek = face_landmarks.landmark[234]
+                        right_cheek = face_landmarks.landmark[454]
+                        
+                        face_height = abs(forehead.y - chin.y) * orig_h
+                        face_width = abs(left_cheek.x - right_cheek.x) * orig_w
+                        face_area = face_height * face_width
+                        max_possible_area = orig_w * orig_h * 0.25  # Face can't be > 25% of frame
+                        
+                        # Calculate scores
                         center_score = 1.0 - abs(face_x - orig_w / 2) / (orig_w / 2)
-                        combined_score = (activity * (1 - center_weight)) + (center_score * center_weight)
+                        size_score = min(1.0, face_area / max_possible_area)  # Bigger face = better
+                        
+                        # Combined score: activity + center + size
+                        # Activity weight = remaining after center and size
+                        activity_weight = max(0.2, 1.0 - center_weight - face_size_weight)
+                        combined_score = (activity * activity_weight) + (center_score * center_weight) + (size_score * face_size_weight)
                         
                         faces_data.append({
                             'x': face_x,
                             'activity': activity,
+                            'size': face_area,
                             'combined_score': combined_score
                         })
                         

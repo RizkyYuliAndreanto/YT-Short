@@ -6,7 +6,39 @@ import threading
 import customtkinter as ctk
 from tkinter import messagebox
 
+from config.ai_provider_config import AI_PROVIDERS_CONFIG, get_provider_base_url
 from pages.settings.base_dialog import BaseSettingsSubPage
+
+
+# Generate provider dropdown options from config
+def get_provider_dropdown_options():
+    """Get list of provider display names for dropdown"""
+    # Priority order - most commonly used first
+    priority_order = ["ytclip", "openai", "groq", "openrouter", "google", "anthropic", "mistral", "together", "custom"]
+    
+    options = []
+    # Add priority providers first
+    for key in priority_order:
+        if key in AI_PROVIDERS_CONFIG:
+            options.append(AI_PROVIDERS_CONFIG[key]["name"])
+    
+    # Add remaining providers
+    for key in AI_PROVIDERS_CONFIG:
+        if key not in priority_order:
+            options.append(AI_PROVIDERS_CONFIG[key]["name"])
+    
+    return options
+
+def get_provider_key_from_name(display_name: str) -> str:
+    """Get provider key from display name"""
+    for key, config in AI_PROVIDERS_CONFIG.items():
+        if config["name"] == display_name:
+            return key
+    return "custom"
+
+def get_provider_name_from_key(provider_key: str) -> str:
+    """Get display name from provider key"""
+    return AI_PROVIDERS_CONFIG.get(provider_key, {}).get("name", "⚙️ Custom/Local")
 
 
 class BaseProviderSettingsPage(BaseSettingsSubPage):
@@ -40,9 +72,9 @@ class BaseProviderSettingsPage(BaseSettingsSubPage):
         
         ctk.CTkLabel(type_frame, text="Select API Provider", font=ctk.CTkFont(size=11)).pack(anchor="w")
         
-        self.provider_type_var = ctk.StringVar(value="ytclip")
+        self.provider_type_var = ctk.StringVar(value="⭐ YTClip AI")
         self.provider_dropdown = ctk.CTkOptionMenu(type_frame, 
-            values=["🎬 YT CLIP AI", "🤖 OPEN AI", "⚙️ CUSTOM"],
+            values=get_provider_dropdown_options(),
             variable=self.provider_type_var, height=36,
             command=self._on_provider_type_changed)
         self.provider_dropdown.pack(fill="x", pady=(5, 0))
@@ -128,30 +160,34 @@ class BaseProviderSettingsPage(BaseSettingsSubPage):
     
     def _on_provider_type_changed(self, value):
         """Handle provider type dropdown change"""
-        if "CUSTOM" in value:
+        provider_key = get_provider_key_from_name(value)
+        
+        # Show URL section only for custom provider
+        if provider_key == "custom":
             self.url_section.pack(fill="x", pady=(0, 10), after=self.content.winfo_children()[1])
         else:
             self.url_section.pack_forget()
+        
+        # Pre-fill URL with provider's default base URL
+        base_url = get_provider_base_url(provider_key)
+        if base_url:
+            self.url_entry.delete(0, "end")
+            self.url_entry.insert(0, base_url)
     
     def _get_provider_type_key(self):
         """Get provider type key from dropdown value"""
-        value = self.provider_type_var.get()
-        if "YT CLIP" in value:
-            return "ytclip"
-        elif "OPEN AI" in value:
-            return "openai"
-        else:
-            return "custom"
+        return get_provider_key_from_name(self.provider_type_var.get())
     
     def get_base_url(self):
         """Get base URL based on provider type"""
         ptype = self._get_provider_type_key()
-        if ptype == "ytclip":
-            return "https://ai-api.ytclip.org/v1"
-        elif ptype == "openai":
-            return "https://api.openai.com/v1"
-        else:
-            return self.url_entry.get().strip() or "https://api.openai.com/v1"
+        
+        # For custom provider, use user-entered URL
+        if ptype == "custom":
+            return self.url_entry.get().strip() or "http://localhost:8000/v1"
+        
+        # For known providers, use config URL
+        return get_provider_base_url(ptype) or self.url_entry.get().strip()
     
     def load_models(self):
         """Load available models from API"""
@@ -237,12 +273,19 @@ class BaseProviderSettingsPage(BaseSettingsSubPage):
         
         # Determine provider type from URL
         base_url = provider.get("base_url", "")
-        if "ytclip" in base_url:
-            self.provider_type_var.set("🎬 YT CLIP AI")
-        elif "openai.com" in base_url:
-            self.provider_type_var.set("🤖 OPEN AI")
+        
+        # Find matching provider from URL
+        matched_provider = None
+        for key, pconfig in AI_PROVIDERS_CONFIG.items():
+            if pconfig["base_url"] and pconfig["base_url"] in base_url:
+                matched_provider = key
+                break
+        
+        if matched_provider:
+            self.provider_type_var.set(get_provider_name_from_key(matched_provider))
+            self.url_section.pack_forget()
         else:
-            self.provider_type_var.set("⚙️ CUSTOM")
+            self.provider_type_var.set("⚙️ Custom/Local")
             self.url_section.pack(fill="x", pady=(0, 10), after=self.content.winfo_children()[1])
         
         self.url_entry.delete(0, "end")

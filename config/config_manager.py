@@ -3,8 +3,74 @@ Configuration manager for YT Short Clipper
 """
 
 import json
+import os
 import uuid
 from pathlib import Path
+
+# Load .env file
+try:
+    from dotenv import load_dotenv
+    # Load from .env file in app directory
+    env_path = Path(__file__).parent.parent / ".env"
+    load_dotenv(env_path)
+except ImportError:
+    pass  # python-dotenv not installed, use os.environ only
+
+
+def get_api_key_from_env(provider_key: str, config_api_key: str = "") -> str:
+    """
+    Get API key with priority: config > environment variable
+    
+    Environment variable mapping:
+    - groq -> GROQ_API_KEY
+    - openrouter -> OPENROUTER_API_KEY  
+    - openai -> OPENAI_API_KEY
+    - google -> GOOGLE_API_KEY
+    - anthropic -> ANTHROPIC_API_KEY
+    """
+    # If config has a real API key (not placeholder), use it
+    if config_api_key and not config_api_key.startswith("MASUKKAN_") and not config_api_key.startswith("KOSONGKAN_"):
+        return config_api_key
+    
+    # Otherwise, try environment variable
+    env_mapping = {
+        "groq": "GROQ_API_KEY",
+        "openrouter": "OPENROUTER_API_KEY",
+        "openai": "OPENAI_API_KEY",
+        "google": "GOOGLE_API_KEY",
+        "anthropic": "ANTHROPIC_API_KEY",
+        "ytclip": "YTCLIP_API_KEY",
+        "mistral": "MISTRAL_API_KEY",
+        "together": "TOGETHER_API_KEY",
+        "cohere": "COHERE_API_KEY",
+    }
+    
+    env_var = env_mapping.get(provider_key, "")
+    if env_var:
+        return os.environ.get(env_var, config_api_key)
+    
+    return config_api_key
+
+
+def detect_provider_from_url(base_url: str) -> str:
+    """Detect provider key from base URL"""
+    url_mapping = {
+        "api.groq.com": "groq",
+        "openrouter.ai": "openrouter",
+        "api.openai.com": "openai",
+        "generativelanguage.googleapis.com": "google",
+        "api.anthropic.com": "anthropic",
+        "ytclip.org": "ytclip",
+        "api.mistral.ai": "mistral",
+        "api.together.xyz": "together",
+        "api.cohere.ai": "cohere",
+    }
+    
+    for url_part, provider in url_mapping.items():
+        if url_part in base_url:
+            return provider
+    
+    return "custom"
 
 
 class ConfigManager:
@@ -120,27 +186,27 @@ class ConfigManager:
         return config
     
     def _get_default_ai_providers(self):
-        """Get default AI provider configuration"""
+        """Get default AI provider configuration (uses Groq by default - FREE)"""
         return {
             "highlight_finder": {
-                "base_url": "https://api.openai.com/v1",
-                "api_key": "",
-                "model": "gpt-4.1"
+                "base_url": "https://api.groq.com/openai/v1",
+                "api_key": "",  # Will be loaded from GROQ_API_KEY env var
+                "model": "llama-3.3-70b-versatile"
             },
             "caption_maker": {
-                "base_url": "https://api.openai.com/v1",
-                "api_key": "",
-                "model": "whisper-1"
+                "base_url": "https://api.groq.com/openai/v1",
+                "api_key": "",  # Will be loaded from GROQ_API_KEY env var
+                "model": "whisper-large-v3"
             },
             "hook_maker": {
                 "base_url": "https://api.openai.com/v1",
-                "api_key": "",
+                "api_key": "",  # Will be loaded from OPENAI_API_KEY env var (TTS requires OpenAI)
                 "model": "tts-1"
             },
             "youtube_title_maker": {
-                "base_url": "https://api.openai.com/v1",
-                "api_key": "",
-                "model": "gpt-4.1"
+                "base_url": "https://api.groq.com/openai/v1",
+                "api_key": "",  # Will be loaded from GROQ_API_KEY env var
+                "model": "llama-3.3-70b-versatile"
             }
         }
     
@@ -188,6 +254,31 @@ class ConfigManager:
     def get(self, key, default=None):
         """Get configuration value"""
         return self.config.get(key, default)
+    
+    def get_resolved_ai_providers(self):
+        """
+        Get AI providers config with API keys resolved from environment variables.
+        Priority: config value > environment variable
+        """
+        ai_providers = self.config.get("ai_providers", self._get_default_ai_providers())
+        resolved = {}
+        
+        for task_key, provider_config in ai_providers.items():
+            base_url = provider_config.get("base_url", "")
+            config_api_key = provider_config.get("api_key", "")
+            
+            # Detect provider from URL and resolve API key
+            provider_key = detect_provider_from_url(base_url)
+            resolved_api_key = get_api_key_from_env(provider_key, config_api_key)
+            
+            resolved[task_key] = {
+                "base_url": base_url,
+                "api_key": resolved_api_key,
+                "model": provider_config.get("model", ""),
+                "system_message": provider_config.get("system_message", "")
+            }
+        
+        return resolved
     
     def set(self, key, value):
         """Set configuration value and save"""

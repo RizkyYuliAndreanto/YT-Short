@@ -8,6 +8,7 @@ import customtkinter as ctk
 from tkinter import messagebox
 
 from utils.helpers import get_ffmpeg_path, get_ytdlp_path
+from config.config_manager import get_api_key_from_env, detect_provider_from_url
 
 
 class APIStatusPage(ctk.CTkFrame):
@@ -178,9 +179,13 @@ class APIStatusPage(ctk.CTkFrame):
             
             for provider_key, status_label, info_label in providers_to_check:
                 provider_config = ai_providers.get(provider_key, {})
-                api_key = provider_config.get("api_key", "")
+                config_api_key = provider_config.get("api_key", "")
                 base_url = provider_config.get("base_url", "https://api.openai.com/v1")
                 model = provider_config.get("model", "N/A")
+                
+                # Resolve API key from environment if not in config
+                detected_provider = detect_provider_from_url(base_url)
+                api_key = get_api_key_from_env(detected_provider, config_api_key)
                 
                 if not api_key:
                     self.after(0, lambda sl=status_label, il=info_label: (

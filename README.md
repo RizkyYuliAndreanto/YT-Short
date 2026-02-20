@@ -20,6 +20,7 @@ Download the desktop app and follow the complete setup guide:
 - 📖 **[Panduan Indonesia](PANDUAN.md)** - Panduan lengkap dengan screenshot
 
 **What you'll learn:**
+
 1. How to download and run the app
 2. Setup required libraries (yt-dlp, FFmpeg, Deno)
 3. Setup YouTube cookies for video access
@@ -95,11 +96,11 @@ If you want to contribute or run from source:
 
 ### System Dependencies
 
-| Dependency | Version | Purpose |
-|------------|---------|---------|
-| Python | 3.10+ | Runtime |
-| FFmpeg | 4.4+ | Video processing |
-| yt-dlp | Latest | YouTube downloading |
+| Dependency | Version | Purpose             |
+| ---------- | ------- | ------------------- |
+| Python     | 3.10+   | Runtime             |
+| FFmpeg     | 4.4+    | Video processing    |
+| yt-dlp     | Latest  | YouTube downloading |
 
 ### Python Dependencies
 
@@ -119,6 +120,7 @@ google-auth-httplib2>=0.1.1
 ### API Keys
 
 The app supports **10+ AI providers** including:
+
 - **YT Clip AI** (Recommended) - [https://ai.ytclip.org](https://ai.ytclip.org)
 - **OpenAI** - GPT-4, Whisper, TTS
 - **Google Gemini** - Free tier available
@@ -143,17 +145,35 @@ cd yt-short-clipper
 
 ### 2. Install System Dependencies
 
-**Windows (using Chocolatey):**
+> **Note:** The app will **auto-download FFmpeg** on first run if not found. Manual installation is optional but recommended for better control.
+
+**Windows (choose one method):**
+
 ```powershell
+# Using winget (Built-in Windows Package Manager - Recommended)
+winget install Gyan.FFmpeg
+winget install yt-dlp.yt-dlp
+
+# Using Scoop
+scoop install ffmpeg yt-dlp
+
+# Using Chocolatey
 choco install ffmpeg yt-dlp
+
+# Manual Download:
+# FFmpeg: https://github.com/GyanD/codexffmpeg/releases (download full_build.zip)
+# yt-dlp: https://github.com/yt-dlp/yt-dlp/releases (download yt-dlp.exe)
+# Extract and add to PATH, or place in app folder
 ```
 
 **macOS (using Homebrew):**
+
 ```bash
 brew install ffmpeg yt-dlp
 ```
 
 **Ubuntu/Debian:**
+
 ```bash
 sudo apt update
 sudo apt install ffmpeg
@@ -229,12 +249,14 @@ Each clip folder contains a `data.json` file with metadata:
 All settings can be configured through the GUI Settings page (⚙️ button in the app).
 
 For complete setup instructions with screenshots, see:
+
 - [English Guide](GUIDE.md#5-ai-api-configuration)
 - [Panduan Indonesia](PANDUAN.md#5-konfigurasi-ai-api)
 
 ### AI Provider Selection
 
 The app supports **10+ AI providers** with intelligent auto-fill:
+
 - YT Clip AI (Recommended)
 - OpenAI
 - Google Gemini
@@ -246,48 +268,50 @@ For detailed provider comparison and setup, see: [AI_PROVIDER_SELECTOR.md](AI_PR
 
 ### Highlight Detection Parameters
 
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `num_clips` | 5 | Number of clips to generate |
-| `min_duration` | 60s | Minimum clip duration |
-| `max_duration` | 120s | Maximum clip duration |
-| `target_duration` | 90s | Ideal clip duration |
-| `temperature` | 1.0 | AI creativity (0.0-2.0) |
+| Parameter         | Default | Description                 |
+| ----------------- | ------- | --------------------------- |
+| `num_clips`       | 5       | Number of clips to generate |
+| `min_duration`    | 60s     | Minimum clip duration       |
+| `max_duration`    | 120s    | Maximum clip duration       |
+| `target_duration` | 90s     | Ideal clip duration         |
+| `temperature`     | 1.0     | AI creativity (0.0-2.0)     |
 
 ### Portrait Conversion Parameters
 
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `output_resolution` | 1080x1920 | Output video resolution |
-| `min_frames_before_switch` | 210 | Frames before speaker switch (~7s at 30fps) |
-| `switch_threshold` | 3.0 | Movement multiplier to trigger switch |
+| Parameter                  | Default   | Description                                 |
+| -------------------------- | --------- | ------------------------------------------- |
+| `output_resolution`        | 1080x1920 | Output video resolution                     |
+| `min_frames_before_switch` | 210       | Frames before speaker switch (~7s at 30fps) |
+| `switch_threshold`         | 3.0       | Movement multiplier to trigger switch       |
 
 ### Caption Parameters
 
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `language` | id | Transcription language |
-| `chunk_size` | 4 | Words per caption line |
+| Parameter    | Default | Description            |
+| ------------ | ------- | ---------------------- |
+| `language`   | id      | Transcription language |
+| `chunk_size` | 4       | Words per caption line |
 
 ### Hook Generation Parameters
 
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `tts_voice` | nova | OpenAI TTS voice (nova/shimmer/alloy) |
-| `tts_speed` | 1.0 | Speech speed |
-| `max_words` | 15 | Maximum words in hook text |
-| `tts_model` | tts-1 | TTS model (tts-1 or tts-1-hd) |
+| Parameter   | Default | Description                           |
+| ----------- | ------- | ------------------------------------- |
+| `tts_voice` | nova    | OpenAI TTS voice (nova/shimmer/alloy) |
+| `tts_speed` | 1.0     | Speech speed                          |
+| `max_words` | 15      | Maximum words in hook text            |
+| `tts_model` | tts-1   | TTS model (tts-1 or tts-1-hd)         |
 
 ---
 
 ## 🔧 How It Works
 
 ### 1. Video Download
+
 - Uses yt-dlp to download video in best quality (max 1080p)
 - Automatically fetches Indonesian auto-generated subtitles
 - Extracts video metadata (title, description, channel)
 
 ### 2. Highlight Detection
+
 - Parses SRT subtitle file with timestamps
 - Sends transcript to GPT-4 with specific criteria:
   - Punchlines and funny moments
@@ -299,6 +323,7 @@ For detailed provider comparison and setup, see: [AI_PROVIDER_SELECTOR.md](AI_PR
 - Generates hook text for each highlight
 
 ### 3. Portrait Conversion
+
 - Uses OpenCV Haar Cascade for face detection
 - Tracks lip movement to identify active speaker
 - Implements "camera cut" style switching (not smooth panning)
@@ -306,6 +331,7 @@ For detailed provider comparison and setup, see: [AI_PROVIDER_SELECTOR.md](AI_PR
 - Maintains 9:16 aspect ratio at 1080x1920
 
 ### 4. Hook Generation
+
 - Extracts first frame from clip
 - Generates TTS audio using OpenAI's voice API
 - Creates intro scene with:
@@ -315,6 +341,7 @@ For detailed provider comparison and setup, see: [AI_PROVIDER_SELECTOR.md](AI_PR
 - Concatenates hook with main clip
 
 ### 5. Caption Generation
+
 - Transcribes audio using OpenAI Whisper
 - Creates ASS subtitle file with:
   - Word-by-word timing
@@ -340,15 +367,15 @@ Position: Lower third (350px from bottom)
 
 ---
 
-## � API Usage & Costs 
+## � API Usage & Costs
 
 Estimated OpenAI API costs per video (5 clips):
 
-| Feature | Model | Est. Cost |
-|---------|-------|-----------|
-| Highlight Detection | GPT-4.1 | ~$0.05-0.15 |
-| TTS Voiceover | TTS-1 | ~$0.01/clip |
-| Captions | Whisper API | ~$0.01/clip |
+| Feature             | Model       | Est. Cost   |
+| ------------------- | ----------- | ----------- |
+| Highlight Detection | GPT-4.1     | ~$0.05-0.15 |
+| TTS Voiceover       | TTS-1       | ~$0.01/clip |
+| Captions            | Whisper API | ~$0.01/clip |
 
 **Total estimate:** ~$0.10-0.25 per video (5 clips)
 
@@ -365,6 +392,7 @@ Contributions are welcome! We greatly appreciate contributions from anyone.
 For developers who want to build the .exe themselves, see the complete guide in [BUILD.md](BUILD.md).
 
 Quick steps:
+
 ```bash
 # Install dependencies
 pip install -r requirements.txt
@@ -403,12 +431,12 @@ git push origin feature/your-new-feature
 
 ### How to Contribute
 
-| Type | Description |
-|-------|-----------|
-| 🐛 **Bug Report** | Report bugs in the [Issues](../../issues) tab |
+| Type                   | Description                                    |
+| ---------------------- | ---------------------------------------------- |
+| 🐛 **Bug Report**      | Report bugs in the [Issues](../../issues) tab  |
 | 💡 **Feature Request** | Request new features in [Issues](../../issues) |
-| 📖 **Documentation** | Improve docs, fix typos, add examples |
-| 🔧 **Code** | Fix bugs, add features, improve performance |
+| 📖 **Documentation**   | Improve docs, fix typos, add examples          |
+| 🔧 **Code**            | Fix bugs, add features, improve performance    |
 
 📚 **Complete guide available in [CONTRIBUTING.md](CONTRIBUTING.md)** - includes Git tutorial for beginners!
 
@@ -439,9 +467,9 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 Made with ☕ by **Aji Prakoso** for content creators
 
-| | |
-|---|---|
-| 🎓 | [n8n & Automation eCourse](https://classroom.jipraks.com) |
-| 📸 | [@jipraks on Instagram](https://instagram.com/jipraks) |
-| 🎬 | [Aji Prakoso on YouTube](https://youtube.com/@jipraks) |
-| 🌐 | [About Aji Prakoso](https://www.jipraks.com) |
+|     |                                                           |
+| --- | --------------------------------------------------------- |
+| 🎓  | [n8n & Automation eCourse](https://classroom.jipraks.com) |
+| 📸  | [@jipraks on Instagram](https://instagram.com/jipraks)    |
+| 🎬  | [Aji Prakoso on YouTube](https://youtube.com/@jipraks)    |
+| 🌐  | [About Aji Prakoso](https://www.jipraks.com)              |

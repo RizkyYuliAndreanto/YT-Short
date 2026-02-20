@@ -129,7 +129,10 @@ class WebAPI:
         })
         output_dir = cfg.get("output_dir", str(get_app_dir() / "output"))
         model = cfg.get("model", "gpt-4.1")
-        ai_providers = cfg.get("ai_providers")
+        
+        # Get AI providers with API keys resolved from .env
+        cfg_mgr = self._get_cfg_manager()
+        ai_providers = cfg_mgr.get_resolved_ai_providers()
 
         core = AutoClipperCore(
             client=None,

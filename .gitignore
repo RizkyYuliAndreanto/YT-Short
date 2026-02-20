@@ -199,6 +199,25 @@ tmp/
 *.tmp
 *.temp
 
+# Session directories (contains downloaded videos and clips)
+sessions/
+
+# Processing checkpoints (for resuming long videos)
+processing_checkpoint.json
+**/processing_checkpoint.json
+
+# ============================================
+# Long Video Processing
+# ============================================
+# Partial downloads
+*.part
+*.ytdl
+*.part-Frag*
+
+# Live chat JSON (from YouTube)
+*.live_chat.json
+*.live_chat.json.part
+
 # ============================================
 # Whisper Models (large files)
 # ============================================
@@ -319,8 +338,25 @@ video_info.json
 # Data JSON in output folders
 # (uncomment if you want to ignore these)
 # **/data.json
+
+# ============================================
+# Project-specific
+# ============================================
 .kiro
 .trae
 cookies.txt
-ffmpeg
-bin
+ffmpeg/
+bin/
+
+# Deno cache (for yt-dlp JS runtime)
+.deno/
+
+# Error logs
+error.log
+*.error.log
+
+# Token usage tracking
+token_usage.json
+
+# API cache
+.api_cache/
