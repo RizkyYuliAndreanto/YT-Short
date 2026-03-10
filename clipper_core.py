@@ -8,8 +8,6 @@ import subprocess
 import os
 import re
 import json
-import cv2
-import numpy as np
 import tempfile
 import sys
 import time
@@ -20,6 +18,21 @@ from datetime import datetime
 from openai import OpenAI
 from utils.logger import debug_log
 from utils.helpers import get_deno_path, get_ffmpeg_path, is_ytdlp_module_available
+
+# Lazy-loaded heavy modules (cv2 ~500MB, numpy ~150MB, yt_dlp ~100MB)
+# These are only imported when actually needed to save ~800MB RAM at idle
+cv2 = None
+np = None
+
+def _ensure_cv2():
+    """Lazy import cv2 + numpy only when video processing starts"""
+    global cv2, np
+    if cv2 is None:
+        import cv2 as _cv2
+        import numpy as _np
+        cv2 = _cv2
+        np = _np
+    return cv2, np
 
 # Setup Deno and FFmpeg in PATH before importing yt-dlp
 _deno_path = get_deno_path()
@@ -43,18 +56,39 @@ if _ffmpeg_path and Path(_ffmpeg_path).exists():
         os.environ["PATH"] = _ffmpeg_dir
     debug_log(f"FFmpeg added to PATH: {_ffmpeg_dir}")
 
-# Import yt-dlp module if available
+# Import yt-dlp module if available (lazy — only flag presence to save RAM)
+import importlib
 try:
-    import yt_dlp
-    YTDLP_MODULE_AVAILABLE = True
-except ImportError:
+    _yt_dlp_spec = importlib.util.find_spec("yt_dlp")
+    YTDLP_MODULE_AVAILABLE = _yt_dlp_spec is not None
+except Exception:
     YTDLP_MODULE_AVAILABLE = False
 
+# Google GenAI — lazy loaded on demand
 try:
-    import google.generativeai as genai
-    GOOGLE_GENAI_AVAILABLE = True
-except ImportError:
+    _genai_spec = importlib.util.find_spec("google.generativeai")
+    GOOGLE_GENAI_AVAILABLE = _genai_spec is not None
+except Exception:
     GOOGLE_GENAI_AVAILABLE = False
+
+genai = None   # lazy loaded
+yt_dlp = None  # lazy loaded
+
+def _ensure_yt_dlp():
+    """Lazy import yt_dlp only when needed (saves ~100MB RAM)"""
+    global yt_dlp
+    if yt_dlp is None and YTDLP_MODULE_AVAILABLE:
+        import yt_dlp as _yt_dlp
+        yt_dlp = _yt_dlp
+    return yt_dlp
+
+def _ensure_genai():
+    """Lazy import google.generativeai only when needed"""
+    global genai
+    if genai is None and GOOGLE_GENAI_AVAILABLE:
+        import google.generativeai as _genai
+        genai = _genai
+    return genai
 
 # Hide console window on Windows
 SUBPROCESS_FLAGS = 0
@@ -152,6 +186,10 @@ class AutoClipperCore:
         # GPU acceleration settings
         self.gpu_enabled = False
         self.gpu_encoder_args = []
+        
+        # Heatmap / Most Replayed data
+        self.heatmap_data = None  # List[{start_time, end_time, value}] from YouTube
+        self.use_heatmap = True   # Whether to use heatmap for scoring
         
         # MediaPipe Face Mesh (lazy loaded)
         self.mp_face_mesh = None
@@ -267,7 +305,7 @@ class AutoClipperCore:
     @staticmethod
     def get_default_prompt():
         """Get default system prompt for highlight detection"""
-        return """Kamu adalah EDITOR SHORT-FORM TIER A untuk konten PODCAST viral (TikTok / Reels / Shorts).
+        return """Kamu adalah EDITOR SHORT-FORM TIER A untuk konten PODCAST / viral (TikTok / Reels / Shorts).
 
 OUTPUT ANDA AKAN LANGSUNG DIGUNAKAN UNTUK PRODUKSI.
 Kesalahan durasi atau format = GAGAL TOTAL.
@@ -285,35 +323,201 @@ Dari transcript di bawah, HASILKAN TEPAT {num_clips} segment.
 Jika kesulitan menemukan segmen bagus, WAJIB tetap menghasilkan {num_clips} dengan strategi penggabungan/perpanjangan.
 
 ==================================================
+⚡ ATURAN CONTEXT-FIRST (PALING KRITIS)
+=======================================
+
+Setiap clip WAJIB dimulai dari KONTEKS/PERTANYAAN, BUKAN langsung jawaban.
+
+INI ADALAH ATURAN NOMOR 1 YANG TIDAK BOLEH DILANGGAR.
+
+Alasan: Penonton butuh tahu "APA yang sedang dibahas" sebelum mendengar jawaban.
+Tanpa konteks, penonton akan skip karena tidak paham dan tidak tertarik.
+
+ATURAN WAJIB:
+1. Jika ada PERTANYAAN sebelum jawaban → clip HARUS dimulai dari pertanyaan
+2. Jika ada SETUP sebelum punchline → clip HARUS dimulai dari setup
+3. Jika ada PROVOKASI sebelum reaksi → clip HARUS dimulai dari provokasi
+4. Jika ada KONTEKS sebelum insight → clip HARUS dimulai dari konteks
+
+CONTOH BENAR vs SALAH:
+
+✗ SALAH (langsung jawaban, penonton bingung):
+  start_time = saat dokter bilang "Itu mitos, GERD tidak menyebabkan serangan jantung"
+  → Penonton: "Hah? Emang siapa yang nanya? Konteksnya apa?"
+
+✓ BENAR (dimulai dari pertanyaan, penonton penasaran):
+  start_time = saat host bertanya "Dok, benarkah GERD bisa menyebabkan serangan jantung?"
+  → Penonton: "Wah gue juga mau tau!" → TONTON SAMPAI HABIS
+
+✗ SALAH (langsung punchline):
+  start_time = saat tamu bilang "Makanya gue bangkrut"
+  → Penonton: "Bangkrut kenapa? Skip ah"
+
+✓ BENAR (dimulai dari cerita):
+  start_time = saat tamu mulai cerita "Jadi waktu itu gue invest 2 miliar di..."
+  → Penonton: "Invest 2 miliar? Terus gimana?" → TONTON SAMPAI HABIS
+
+PRINSIP: Pertanyaan/setup yang bagus = HOOK TERBAIK.
+Penonton akan bertahan menonton kalau mereka PENASARAN dengan jawabannya.
+
+==================================================
+STRUKTUR NARATIF YANG DIWAJIBKAN
+================================
+
+Setiap clip harus terasa seperti mini-story:
+
+• Awal: Setup / pernyataan pemicu / pertanyaan
+• Tengah: Konflik / insight / cerita / jawaban
+• Akhir: Punchline / payoff / statement kuat
+
+Jika tidak ada payoff, tambahkan konteks hingga ada.
+
+==================================================
+STRUKTUR CLIP YANG OPTIMAL
+==========================
+
+Setiap clip harus mengikuti pola ini:
+
+1. HOOK/SETUP (5-15 detik awal):
+   - Pertanyaan yang memancing rasa ingin tahu
+   - Statement kontroversial yang bikin "HAH?!"
+   - Cerita pembuka yang bikin penasaran
+   - Klaim mengejutkan yang butuh penjelasan
+
+2. INTI/KONFLIK (30-60 detik tengah):
+   - Jawaban/pembahasan dari pertanyaan
+   - Cerita konflik/drama/insight
+   - Penjelasan yang mengejutkan
+
+3. PAYOFF/PENUTUP (5-15 detik akhir):
+   - Kesimpulan yang powerful
+   - Punchline yang bikin ngakak/terharu
+   - Statement penutup yang memorable
+   - Plot twist / fakta mengejutkan
+
+Jika bagian HOOK/SETUP tidak ada di dekat jawaban:
+→ MUNDURKAN start_time ke pertanyaan/konteks terdekat
+→ Lebih baik clip sedikit lebih panjang tapi punya konteks
+
+==================================================
 PRINSIP PEMILIHAN CLIP (WAJIB DIPRIORITASKAN)
 =============================================
 
 Prioritaskan segmen dengan karakteristik berikut:
 
-1. Ada KONFLIK, ketegangan, kontroversi.
-2. Ada PENGAKUAN personal / vulnerability.
-3. Ada STATEMENT tajam / opini berani.
-4. Ada punchline atau momen lucu kuat.
-5. Ada cerita lengkap (setup → buildup → payoff).
-6. Ada kalimat yang bisa berdiri sendiri sebagai hook viral.
-7. Ada FAKTA mengejutkan atau insight baru (untuk dokumenter/edukasi).
-8. Ada momen EMOSIONAL kuat (haru, marah, takjub).
-9. Ada VISUAL storytelling yang kuat (untuk dokumenter/travel).
+1. Ada PERTANYAAN menarik + JAWABAN mengejutkan (Q&A gold)
+2. Ada KONFLIK, ketegangan, kontroversi.
+3. Ada PENGAKUAN personal / vulnerability / curhat.
+4. Ada STATEMENT tajam / opini berani / hot take.
+5. Ada punchline atau momen lucu kuat.
+6. Ada cerita lengkap (setup → buildup → payoff).
+7. Ada kalimat yang bisa berdiri sendiri sebagai hook viral.
+8. Ada FAKTA mengejutkan atau insight baru (untuk dokumenter/edukasi).
+9. Ada momen EMOSIONAL kuat (haru, marah, takjub).
+10. Ada VISUAL storytelling yang kuat (untuk dokumenter/travel).
 
 JENIS KONTEN YANG DIDUKUNG:
 - Podcast: fokus pada statement/punchline/drama
-- Dokumenter: fokus pada fakta mengejutkan/momen emosional
 - Interview: fokus pada confession/insight personal
-- Edukasi: fokus pada tips actionable/aha moment
+- Dokumenter: fokus pada fakta mengejutkan/momen emosional
+- Edukasi: fokus pada mitos vs fakta, tips actionable, aha moment
 - Vlog/Travel: fokus pada momen visual memorable
+- Live Stream / Marathon Stream: fokus pada momen chaos, interaksi spontan, drama real-time, gurauan antar member, bintang tamu, milestone, cerita emosional
+
+==================================================
+🎮 KHUSUS LIVE STREAM / MARATHON STREAM (MARAPTHON-STYLE)
+========================================================
+
+Jika konten adalah LIVE STREAM berdurasi panjang (1-12+ jam), perhatikan:
+
+Live stream BERBEDA dari podcast/interview biasa. Di live stream:
+- Momen viral muncul SPONTAN dan TIDAK TERPREDIKSI
+- Banyak peserta/member yang silih berganti bicara
+- Ada interaksi dengan penonton (donasi, chat, video call)
+- Ada momen dead air / bengong / filler yang HARUS DIHINDARI
+
+TIPE MOMEN BERNILAI TINGGI DI LIVE STREAM:
+
+1. 🔥 DRAMA & KLARIFIKASI (SKOR 9-10):
+   - Member klarifikasi isu kontroversial
+   - Asbun (ngomong asal/spontan) yang bikin heboh
+   - Perdebatan/roasting antar member
+   - Statement mengejutkan yang tidak disengaja
+   - Curhat/confession spontan member
+
+2. 😂 MOMEN KOCAK & CHAOS (SKOR 8-10):
+   - Gurauan/banter antar member yang bikin ngakak
+   - Reaksi berlebihan/kaget dari member
+   - Momen awkward yang jadi lucu
+   - Prank atau kejadian absurd spontan
+   - Member ngomong hal random yang viral
+
+3. 🌟 BINTANG TAMU & KEJUTAN (SKOR 8-10):
+   - Tamu spesial datang (selebriti, kreator lain, dll)
+   - Reaksi member saat tamu muncul
+   - Interaksi unik antara tamu dan host
+   - Surprise/kejutan di tengah live
+
+4. 😢 MOMEN EMOSIONAL & CERITA SEDIH (SKOR 8-10):
+   - Member cerita pengalaman berat/sedih
+   - Momen haru yang bikin penonton ikut terharu
+   - Dukungan/support antar member
+   - Cerita personal tentang kehilangan/perjuangan
+   - Momen tulus yang jarang terlihat
+
+5. 🏆 MILESTONE & PENCAPAIAN (SKOR 7-9):
+   - Target donasi/subscriber tercapai
+   - Reaksi saat milestone tercapai
+   - Pengumuman penting saat live
+   - Momen "kita berhasil!" yang membahagiakan
+
+6. 💬 INTERAKSI PENONTON EPIC (SKOR 7-9):
+   - Donasi/superchat dengan pesan menarik + reaksi host
+   - Video call dengan penonton yang unik/lucu/emosional
+   - Chat wars atau momen interaksi massal
+   - Media share yang bikin heboh
+
+7. 🎲 GAMES & CHALLENGE (SKOR 6-8):
+   - Momen seru saat main game bareng
+   - Challenge antar member dengan taruhan
+   - Reaksi kalah/menang yang dramatis
+   - Momen kompetitif yang intens
+
+8. 💰 MOMEN DERMAWAN & SOSIAL (SKOR 8-10):
+   - Pengumuman bantuan sosial (haji, beasiswa, dll)
+   - Donasi besar untuk kegiatan amal
+   - Momen berbagi yang mengharukan
+   - Statement tentang misi sosial live stream
+
+DILARANG KERAS SAAT CLIPPING LIVE STREAM:
+* Momen BENGONG / duduk diam tanpa bicara
+* Momen loading/buffering/technical issue
+* Transisi antar segment tanpa konten
+* Obrolan ultra-ringan tanpa substansi ("halo", "gimana kabar")
+* Member scroll HP tanpa interaksi
+* Momen istirahat/makan tanpa percakapan menarik
+* Bagian yang hanya menampilkan layar game tanpa komentar menarik
+
+STRATEGI KHUSUS LIVE STREAM:
+→ SKIP semua momen dead air / bengong
+→ FOKUS pada puncak emosi, bukan build-up lambat
+→ Pastikan setiap clip punya AKSI atau DIALOG yang jelas
+→ Jika ada nama member/host → gunakan di hook_text
+→ Cari momen dimana BANYAK orang bicara/bereaksi bersamaan
+→ Untuk live stream 12+ jam, spread clips MERATA di seluruh durasi
+→ JANGAN ambil semua clip dari 1-2 jam pertama saja
 
 Hindari:
 
-* Obrolan filler
-* Basa-basi
+* Obrolan filler tanpa substansi
+* Basa-basi / salam pembuka
+* Intro/outro yang tidak menambah nilai
 * Transisi topik tanpa payoff
 * Penjelasan teknis panjang tanpa emosi
-* Intro/outro yang tidak menambah nilai
+* Jawaban tanpa pertanyaan (kehilangan konteks)
+* Punchline tanpa setup (kehilangan daya kejut)
+* Momen bengong/diam tanpa dialog (khusus live stream)
+* Bagian technical issue / loading screen (khusus live stream)
 
 Jika harus memilih, utamakan EMOSI & KONFLIK dibanding edukasi netral.
 
@@ -328,9 +532,11 @@ ATURAN DURASI (KRITIS – TIDAK BOLEH DILANGGAR)
 * LEBIH BAIK clip pendek yang powerful daripada clip panjang yang membosankan.
 
 Jika durasi < 30 detik:
+→ PERPANJANG ke belakang (mundurkan start_time ke pertanyaan/konteks).
 → PERPANJANG dengan konteks sebelum atau sesudahnya.
 
 Jika durasi > 120 detik:
+→ Pangkas bagian yang tidak relevan TANPA memotong pertanyaan awal.
 → Pangkas bagian yang tidak relevan TANPA merusak alur cerita.
 
 ==================================================
@@ -339,29 +545,20 @@ STRATEGI WAJIB JIKA SEGMENT IDEAL TIDAK ADA
 
 Lakukan salah satu atau kombinasi berikut:
 
-1. Gabungkan beberapa bagian berurutan yang masih satu topik.
-2. Tambahkan setup sebelum punchline agar dramatis.
-3. Tambahkan payoff setelah cerita agar terasa lengkap.
-4. Pangkas filler tapi jaga minimal 30 detik.
+1. Gabungkan pertanyaan + jawaban yang masih satu topik.
+2. Gabungkan beberapa bagian berurutan yang masih satu topik.
+3. Tambahkan setup/pertanyaan sebelum punchline agar ada konteks.
+4. Tambahkan payoff setelah cerita agar terasa lengkap.
+5. Pangkas filler tapi jaga minimal 30 detik.
+6. Mundurkan start_time ke kalimat pemicu/pertanyaan terdekat.
 
 DILARANG:
 
 * Menghasilkan clip < 30 detik
+* Memulai clip di tengah jawaban tanpa konteks
 * Mengurangi jumlah clip
 * Mengabaikan timestamp asli
 * Mengarang timestamp
-
-==================================================
-STRUKTUR NARATIF YANG DIWAJIBKAN
-================================
-
-Setiap clip harus terasa seperti mini-story:
-
-• Awal: Setup / pernyataan pemicu
-• Tengah: Konflik / insight / cerita
-• Akhir: Punchline / payoff / statement kuat
-
-Jika tidak ada payoff, tambahkan konteks hingga ada.
 
 ==================================================
 FIELD WAJIB (PERSIS 6 FIELD – TIDAK BOLEH LEBIH/KURANG)
@@ -390,21 +587,24 @@ VIRALITY SCORE (WAJIB OBJEKTIF)
 8–10:
 
 * Kontroversial
+* Pertanyaan kontroversial + jawaban mengejutkan
 * Emosional kuat
-* Confession pribadi
-* Statement berani
-* Punchline keras
+* Confession pribadi / Pengakuan berat
+* Statement berani / hot take
+* Punchline keras / momen lucu viral
 
 5–7:
 
-* Insight menarik
-* Cerita cukup engaging
+* Q&A menarik tapi tidak kontroversial
+* Insight menarik / cukup engaging
+* Cerita cukup engaging / personal ringan
 * Momen lucu ringan
 
 1–4:
 
-* Informasi biasa
-* Tidak ada emosi
+* Informasi biasa tanpa hook
+* Tidak ada pertanyaan menarik
+* Tidak ada emosi / konflik
 * Tidak ada hook kuat
 
 Jangan kasih semua clip skor tinggi.
@@ -421,10 +621,24 @@ WAJIB:
 * TANPA emoji
 * WAJIB menyebut NAMA ORANG yang berbicara
 * Harus berupa kutipan, statement tajam, atau punchline
+* PRIORITAS: Gunakan PERTANYAAN sebagai hook (karena pertanyaan = rasa penasaran)
+* Atau kutipan/statement tajam yang bikin "HAH?!"
 
-Contoh benar:
+Contoh benar (pertanyaan sebagai hook):
+"Host ke Dr. Tirta: Dok benarkah GERD bisa bikin serangan jantung?"
+"Deddy: Lo pernah hampir mati beneran?"
+
+Contoh benar (statement sebagai hook):
 "Andre Taulany: Gua hampir bangkrut gara-gara ini"
 "Deddy Corbuzier: Banyak podcaster cuma pura-pura sukses"
+"Dr. Tirta: 90% orang salah paham soal GERD"
+
+Contoh benar (live stream / marapthon):
+"Aloy tiba-tiba asbun: Gue mau klarifikasi sesuatu!"
+"Member nangis cerita soal keluarganya di live"
+"SMASH datang ke Marapthon, semua member kaget!"
+"Arap: Kita berhasil berangkatkan haji 4 orang!"
+"Momen chaos saat donasi tembus target di live"
 
 Hook harus bisa berdiri sendiri sebagai headline viral.
 
@@ -436,10 +650,11 @@ Periksa:
 
 1. Jumlah segment = {num_clips} ?
 2. Semua durasi 30–120 detik ?
-3. Semua punya tepat 6 field ?
-4. virality_score berupa integer 1–10 ?
-5. Tidak ada field lain ?
-6. Tidak ada teks di luar JSON ?
+3. Setiap clip dimulai dari PERTANYAAN/KONTEKS, bukan tengah jawaban ?
+4. Semua punya tepat 6 field ?
+5. virality_score berupa integer 1–10 ?
+6. Tidak ada field lain ?
+7. Tidak ada teks di luar JSON ?
 
 Jika ada kesalahan → PERBAIKI sebelum output.
 
@@ -621,6 +836,7 @@ Transcript:
     
     def _download_video_module(self, url: str) -> tuple:
         """Download video using yt-dlp Python module API"""
+        _ensure_yt_dlp()
         self.log(f"  Using yt-dlp module v{yt_dlp.version.__version__}")
         
         video_info = {}
@@ -659,23 +875,39 @@ Transcript:
                 self.log("  Download finished, processing...")
                 self.set_progress("Processing downloaded file...", 0.25)
         
-        # High-quality format selector
-        format_selector = "bestvideo[height>=720][height<=2160]+bestaudio/best[height>=720][height<=2160]/bestvideo+bestaudio/best"
+        # High-quality format selector with fallbacks
+        # Use 'bv*+ba/b' as ultimate fallback to get ANY available format
+        format_selector = "bestvideo[height>=720][height<=2160]+bestaudio/best[height>=720][height<=2160]/bestvideo+bestaudio/best/bv*+ba/b"
         
         # Base yt-dlp options
         ydl_opts = {
             'format': format_selector,
             'format_sort': ['res', 'br'],
-            'writesubtitles': True,
-            'writeautomaticsub': True,
-            'subtitleslangs': [self.subtitle_language],
-            'subtitlesformat': 'srt',
+        }
+        
+        # Only request subtitles if a real language is selected (skip for AI transcription mode)
+        if self.subtitle_language and self.subtitle_language != "none":
+            ydl_opts['writesubtitles'] = True
+            ydl_opts['writeautomaticsub'] = True
+            # Include base language as fallback for codes like 'id-orig'
+            sub_langs = [self.subtitle_language]
+            base_lang = self.subtitle_language.split('-')[0] if '-' in self.subtitle_language else None
+            if base_lang and base_lang not in sub_langs:
+                sub_langs.append(base_lang)
+            ydl_opts['subtitleslangs'] = sub_langs
+            ydl_opts['subtitlesformat'] = 'srt'
+        else:
+            self.log("  Skipping subtitle download (AI transcription mode)")
+        
+        # Common options
+        ydl_opts.update({
             'merge_output_format': 'mp4',
             'outtmpl': str(self.temp_dir / 'source.%(ext)s'),
             'progress_hooks': [progress_hook],
             'quiet': True,
             'no_warnings': False,
             'extract_flat': False,
+            'ignore_no_formats_error': True,  # Don't fail if some formats unavailable
             # Network resilience options for unstable connections
             'retries': 10,  # Retry download on error
             'fragment_retries': 10,  # Retry failed fragments
@@ -684,7 +916,10 @@ Transcript:
             'http_chunk_size': 1048576,  # 1MB chunks for better resume
             'noprogress': False,
             'continuedl': True,  # Continue partial downloads
-        }
+            # NOTE: Don't force specific player_client here - it can prevent
+            # auto-generated subtitles from being downloaded (PO token requirement).
+            # Let yt-dlp use its default client selection for best compatibility.
+        })
         
         # Add Deno JS runtime if available
         if deno_path and Path(deno_path).exists():
@@ -744,8 +979,21 @@ Transcript:
                         "title": info.get("title", ""),
                         "description": (info.get("description", "") or "")[:2000],
                         "channel": info.get("channel", ""),
+                        "duration": info.get("duration", 0),
                     }
                     self.log(f"  Title: {video_info['title'][:50]}...")
+                    
+                    # Extract heatmap (Most Replayed) data from YouTube
+                    raw_heatmap = info.get("heatmap")
+                    if raw_heatmap and isinstance(raw_heatmap, list) and len(raw_heatmap) > 0:
+                        self.heatmap_data = raw_heatmap
+                        # Find peak engagement
+                        peak = max(raw_heatmap, key=lambda x: x.get("value", 0))
+                        avg_val = sum(h.get("value", 0) for h in raw_heatmap) / len(raw_heatmap)
+                        self.log(f"  📊 Heatmap: {len(raw_heatmap)} segments | peak={peak['value']:.2f} at {peak['start_time']:.0f}s | avg={avg_val:.2f}")
+                    else:
+                        self.heatmap_data = None
+                        self.log(f"  📊 Heatmap: not available for this video")
                 
                 # Now download
                 self.log(f"  Downloading video with {self.subtitle_language} subtitle...")
@@ -811,20 +1059,44 @@ Transcript:
                 raise Exception(f"Download failed!\n\n{last_error}")
         
         video_path = self.temp_dir / "source.mp4"
-        srt_path = self.temp_dir / f"source.{self.subtitle_language}.srt"
-        
-        if not srt_path.exists():
-            # Check if any subtitle was downloaded (fallback to other languages)
-            available_subs = list(self.temp_dir.glob("source.*.srt"))
-            if available_subs:
-                srt_path = available_subs[0]
-                detected_lang = srt_path.stem.split('.')[-1]
-                self.log(f"  ⚠ {self.subtitle_language} subtitle not found, using {detected_lang} instead")
-            else:
-                srt_path = None
-                self.log(f"  ✗ No subtitle found for language: {self.subtitle_language}")
+        srt_path = self._find_subtitle_file()
         
         return str(video_path), str(srt_path) if srt_path else None, video_info
+    
+    def _find_subtitle_file(self):
+        """Find the downloaded subtitle file with fallback logic.
+        
+        Handles cases where yt-dlp saves the file with a different language
+        code than requested (e.g., requesting 'id-orig' but file saved as
+        'source.id-orig.srt' or 'source.id.srt').
+        """
+        # Try exact match first
+        srt_path = self.temp_dir / f"source.{self.subtitle_language}.srt"
+        if srt_path.exists():
+            self.log(f"  ✓ Subtitle found: {srt_path.name}")
+            return srt_path
+        
+        # Try base language (e.g., 'id' for 'id-orig')
+        if '-' in self.subtitle_language:
+            base_lang = self.subtitle_language.split('-')[0]
+            base_path = self.temp_dir / f"source.{base_lang}.srt"
+            if base_path.exists():
+                self.log(f"  ⚠ {self.subtitle_language} not found, using {base_lang} subtitle instead")
+                return base_path
+        
+        # Glob fallback - any subtitle file
+        available_subs = list(self.temp_dir.glob("source.*.srt"))
+        if available_subs:
+            srt_path = available_subs[0]
+            detected_lang = srt_path.stem.split('.')[-1]
+            self.log(f"  ⚠ {self.subtitle_language} subtitle not found, using {detected_lang} instead")
+            return srt_path
+        
+        # Nothing found - log available files for debugging
+        all_files = list(self.temp_dir.glob("source.*"))
+        self.log(f"  ✗ No subtitle found for language: {self.subtitle_language}")
+        self.log(f"  Files in temp dir: {[f.name for f in all_files]}")
+        return None
     
     def _download_video_subprocess(self, url: str) -> tuple:
         """Download video using yt-dlp subprocess (fallback)"""
@@ -920,22 +1192,29 @@ Transcript:
                 self.ytdlp_path,
                 "-f", format_selector,
                 "--format-sort", "res,br",
-                # Network resilience options
-                "--retries", "10",
-                "--fragment-retries", "10",
-                "--file-access-retries", "5",
-                "--socket-timeout", "30",
-                "--http-chunk-size", "1M",
                 *base_args,
                 *strategy["extra_args"],
-                "--write-sub", "--write-auto-sub",
-                "--sub-lang", self.subtitle_language,
-                "--convert-subs", "srt",
+            ]
+            
+            # Only request subtitles if a real language is selected
+            if self.subtitle_language and self.subtitle_language != "none":
+                # Include base language as fallback (e.g., 'id' for 'id-orig')
+                sub_langs = self.subtitle_language
+                base_lang = self.subtitle_language.split('-')[0] if '-' in self.subtitle_language else None
+                if base_lang:
+                    sub_langs = f"{self.subtitle_language},{base_lang}"
+                cmd.extend([
+                    "--write-sub", "--write-auto-sub",
+                    "--sub-lang", sub_langs,
+                    "--convert-subs", "srt",
+                ])
+            
+            cmd.extend([
                 "--merge-output-format", "mp4",
                 "--newline",
                 "-o", str(self.temp_dir / "source.%(ext)s"),
                 url
-            ]
+            ])
             
             # Run with realtime progress output
             process = subprocess.Popen(
@@ -1055,18 +1334,7 @@ Transcript:
                 raise Exception(f"Download failed after trying all methods!\n\nLast error:\n{last_error}")
         
         video_path = self.temp_dir / "source.mp4"
-        srt_path = self.temp_dir / f"source.{self.subtitle_language}.srt"
-        
-        if not srt_path.exists():
-            # Check if any subtitle was downloaded (fallback to other languages)
-            available_subs = list(self.temp_dir.glob("source.*.srt"))
-            if available_subs:
-                srt_path = available_subs[0]
-                detected_lang = srt_path.stem.split('.')[-1]
-                self.log(f"  ⚠ {self.subtitle_language} subtitle not found, using {detected_lang} instead")
-            else:
-                srt_path = None
-                self.log(f"  ✗ No subtitle found for language: {self.subtitle_language}")
+        srt_path = self._find_subtitle_file()
         
         return str(video_path), str(srt_path) if srt_path else None, video_info
 
@@ -1152,6 +1420,7 @@ Transcript:
             except Exception as e:
                 debug_log(f"Error reading cookies file: {e}")
             
+            _ensure_yt_dlp()
             debug_log(f"Using yt-dlp module v{yt_dlp.version.__version__}")
             debug_log(f"Cookies path: {cookies_path} (exists: {Path(cookies_path).exists()})")
             
@@ -1175,6 +1444,9 @@ Transcript:
                 'quiet': False,  # Show warnings for debugging
                 'no_warnings': False,
                 'cookiefile': str(cookies_path),  # Ensure string path
+                'extract_flat': False,  # We need full info for subtitles
+                'ignore_no_formats_error': True,  # Don't fail if no video formats available
+                'format': 'best',  # Set a format but ignore errors
             }
             
             # Add Deno JS runtime if available
@@ -1585,40 +1857,88 @@ FORMAT TRANSCRIPT:
 [HH:MM:SS→HH:MM:SS] teks dialog
 Contoh: [00:05:00→00:05:30] Halo semua...
 
+⚡ ATURAN #1 PALING KRITIS - CONTEXT-FIRST:
+Setiap clip WAJIB dimulai dari PERTANYAAN/SETUP, BUKAN langsung jawaban.
+
+Alasan: Penonton butuh tahu konteks ("apa yang dibahas?") sebelum jawaban.
+Tanpa konteks → penonton skip → video gagal.
+
+CONTOH:
+✗ SALAH: Mulai dari "Itu mitos, GERD tidak menyebabkan serangan jantung"
+  → Penonton bingung, tidak ada konteks
+✓ BENAR: Mulai dari "Dok, benarkah GERD bisa sebabkan serangan jantung?"
+  → Penonton penasaran, tonton sampai habis
+
+✗ SALAH: Mulai dari "Makanya gue bangkrut"
+✓ BENAR: Mulai dari "Jadi waktu itu gue invest 2 miliar..."
+
+PRINSIP: Pertanyaan/setup = HOOK TERBAIK.
+
+STRUKTUR CLIP OPTIMAL:
+1. HOOK (5-15s): Pertanyaan/statement pemicu rasa ingin tahu
+2. INTI (30-60s): Jawaban/pembahasan/konflik/insight
+3. PAYOFF (5-15s): Kesimpulan/punchline/plot twist
+
+→ Jika jawaban bagus tapi tanpa pertanyaan, MUNDURKAN start_time ke pertanyaan terdekat.
+
 ⚠️ ATURAN DURASI WAJIB (KRITIS - TIDAK BOLEH DILANGGAR):
 - Setiap clip HARUS berdurasi 60-120 DETIK (1-2 menit)
 - HITUNG: end_time - start_time harus 60-120 detik
 - Lihat timestamp di transcript untuk memilih range yang tepat
+- Target ideal: 45-90 detik
+- HITUNG dari timestamp, JANGAN estimasi dari teks
 
 CONTOH PERHITUNGAN DURASI:
 ✓ BENAR: start="00:02:00,000" end="00:03:30,000" = 90 detik (1.5 menit)
-✓ BENAR: start="00:10:00,000" end="00:11:15,000" = 75 detik 
+✓ BENAR: start="00:10:00,000" end="00:11:15,000" = 75 detik
 ✗ SALAH: start="00:05:00,000" end="00:05:15,000" = 15 detik (TERLALU PENDEK!)
 ✗ SALAH: start="00:05:00,000" end="00:05:30,000" = 30 detik (TERLALU PENDEK!)
 
 JIKA KONTEN MENARIK TAPI PENDEK:
 → GABUNGKAN dengan bagian sebelum/sesudahnya sampai 30+ detik
 → Cari timestamp mulai dari 30-60 DETIK sebelum punchline
+→ Mundurkan start_time ke pertanyaan/konteks sebelumnya
+→ Gabungkan Q&A berurutan yang satu topik
 
 PRIORITAS KONTEN:
-1. Konflik/kontroversi/drama
-2. Pengakuan personal/curhat
-3. Statement tajam/kontroversial
-4. Momen lucu/punchline kuat
-5. Cerita lengkap (setup→konflik→payoff)
-6. Fakta mengejutkan/insight baru (dokumenter)
-7. Momen emosional kuat (haru/marah/takjub)
+1. Pertanyaan menarik + jawaban mengejutkan (Q&A gold)
+2. Konflik/kontroversi/drama
+3. Pengakuan personal/curhat/confession
+4. Statement tajam/kontroversial/hot take
+5. Punchline/momen lucu kuat
+6. Cerita lengkap (setup→konflik→payoff)
+7. Fakta mengejutkan/insight baru/mitos vs fakta
+8. Momen emosional kuat (haru/marah/takjub)
 
-JENIS KONTEN: Podcast, Dokumenter, Interview, Edukasi, Vlog
+JENIS KONTEN: Podcast, Dokumenter, Interview, Edukasi, Vlog, Live Stream/Marathon
 
-PRIORITAS KONTEN:
-1. Konflik/kontroversi
-2. Pengakuan personal  
-3. Statement tajam
-4. Momen lucu
-5. Cerita lengkap (setup→payoff)
-6. Fakta mengejutkan (dokumenter)
-7. Momen emosional kuat
+🎮 KHUSUS LIVE STREAM / MARATHON (12+ JAM):
+Momen bernilai tinggi di live stream:
+- Drama/klarifikasi/asbun member (skor 9-10)
+- Momen kocak/chaos/gurauan antar member (skor 8-10)
+- Bintang tamu datang + reaksi member (skor 8-10)
+- Cerita sedih/emosional member (skor 8-10)
+- Milestone tercapai (donasi/subscriber) (skor 7-9)
+- Interaksi penonton epic (donasi+reaksi, video call) (skor 7-9)
+- Games/challenge seru antar member (skor 6-8)
+- Momen dermawan/sosial (haji, amal, berbagi) (skor 8-10)
+
+DILARANG di live stream:
+- Momen BENGONG/diam tanpa dialog
+- Loading/technical issue/dead air
+- Scroll HP tanpa interaksi
+- Obrolan ultra-ringan tanpa substansi
+
+STRATEGI LIVE STREAM:
+→ SKIP dead air, FOKUS puncak emosi
+→ Spread clips MERATA di seluruh durasi (jangan hanya jam pertama)
+→ Pastikan setiap clip punya AKSI/DIALOG jelas
+
+HINDARI:
+- Jawaban tanpa pertanyaan (kehilangan konteks)
+- Punchline tanpa setup (kehilangan daya kejut)
+- Filler/basa-basi/transisi tanpa payoff
+- Momen bengong/diam/loading (khusus live stream)
 
 OUTPUT: HANYA JSON array, tanpa markdown/penjelasan.
 
@@ -1628,11 +1948,12 @@ FORMAT (6 field wajib):
 - "title": max 60 karakter
 - "description": max 150 karakter  
 - "virality_score": integer 1-10
-- "hook_text": max 15 kata, sebut NAMA pembicara
+- "hook_text": max 15 kata, sebut NAMA pembicara, prioritas gunakan PERTANYAAN
 
 VALIDASI SEBELUM OUTPUT:
 ✓ Semua clip 30-120 detik?
 ✓ Ada tepat {num_clips} segment?
+✓ Setiap clip dimulai dari pertanyaan/konteks, bukan tengah jawaban?
 
 {video_context}
 
@@ -1651,6 +1972,7 @@ Transcript:
                 raise Exception("No API key configured for Google Gemini")
             
             # Configure genai with API key
+            _ensure_genai()
             genai.configure(api_key=api_key)
             
             # Create model and call API
@@ -1664,6 +1986,161 @@ Transcript:
         except Exception as e:
             self.log(f"  ❌ Google Gemini API Error: {e}")
             raise
+    
+    # ==================================================================
+    # HEATMAP / MOST REPLAYED ANALYSIS
+    # ==================================================================
+    
+    def get_heatmap_score(self, start_sec: float, end_sec: float) -> float:
+        """Get average heatmap engagement score for a time range.
+        
+        Args:
+            start_sec: Clip start time in seconds
+            end_sec: Clip end time in seconds
+            
+        Returns:
+            Average engagement value (0.0 - 1.0). Returns 0.0 if no heatmap data.
+        """
+        if not self.heatmap_data:
+            return 0.0
+        
+        total_value = 0.0
+        overlap_duration = 0.0
+        
+        for seg in self.heatmap_data:
+            seg_start = seg.get("start_time", 0)
+            seg_end = seg.get("end_time", 0)
+            seg_value = seg.get("value", 0)
+            
+            # Calculate overlap between clip and heatmap segment
+            overlap_start = max(start_sec, seg_start)
+            overlap_end = min(end_sec, seg_end)
+            
+            if overlap_end > overlap_start:
+                duration = overlap_end - overlap_start
+                total_value += seg_value * duration
+                overlap_duration += duration
+        
+        if overlap_duration > 0:
+            return total_value / overlap_duration
+        return 0.0
+    
+    def get_heatmap_peaks(self, min_value: float = 0.6, min_duration: float = 10) -> list:
+        """Find peak engagement zones from heatmap data.
+        
+        Returns list of {start, end, avg_value} for high-engagement zones.
+        """
+        if not self.heatmap_data:
+            return []
+        
+        peaks = []
+        current_peak = None
+        
+        for seg in self.heatmap_data:
+            val = seg.get("value", 0)
+            
+            if val >= min_value:
+                if current_peak is None:
+                    current_peak = {
+                        "start": seg["start_time"],
+                        "end": seg["end_time"],
+                        "values": [val]
+                    }
+                else:
+                    current_peak["end"] = seg["end_time"]
+                    current_peak["values"].append(val)
+            else:
+                if current_peak is not None:
+                    duration = current_peak["end"] - current_peak["start"]
+                    if duration >= min_duration:
+                        peaks.append({
+                            "start": current_peak["start"],
+                            "end": current_peak["end"],
+                            "avg_value": sum(current_peak["values"]) / len(current_peak["values"]),
+                            "peak_value": max(current_peak["values"]),
+                            "duration": duration
+                        })
+                    current_peak = None
+        
+        # Don't forget last peak
+        if current_peak is not None:
+            duration = current_peak["end"] - current_peak["start"]
+            if duration >= min_duration:
+                peaks.append({
+                    "start": current_peak["start"],
+                    "end": current_peak["end"],
+                    "avg_value": sum(current_peak["values"]) / len(current_peak["values"]),
+                    "peak_value": max(current_peak["values"]),
+                    "duration": duration
+                })
+        
+        # Sort by avg_value descending
+        peaks.sort(key=lambda x: -x["avg_value"])
+        return peaks
+    
+    def format_heatmap_for_prompt(self) -> str:
+        """Format heatmap peaks as context for AI prompt."""
+        if not self.heatmap_data or not self.use_heatmap:
+            return ""
+        
+        peaks = self.get_heatmap_peaks(min_value=0.5, min_duration=8)
+        if not peaks:
+            return ""
+        
+        # Format top peaks (max 15 to avoid bloating prompt)
+        lines = ["HEATMAP DATA (Most Replayed by viewers - prioritize these segments!):"]
+        for i, p in enumerate(peaks[:15]):
+            start_fmt = f"{int(p['start']//3600):02d}:{int(p['start']%3600//60):02d}:{int(p['start']%60):02d}"
+            end_fmt = f"{int(p['end']//3600):02d}:{int(p['end']%3600//60):02d}:{int(p['end']%60):02d}"
+            bar = "█" * int(p['avg_value'] * 10)
+            lines.append(f"  [{start_fmt} → {end_fmt}] engagement={p['avg_value']:.0%} {bar}")
+        
+        lines.append("")
+        lines.append("INSTRUKSI HEATMAP: Segment dengan engagement TINGGI (>60%) artinya penonton sering replay bagian itu — "
+                      "WAJIB prioritaskan area ini saat memilih klip. Clip yang overlap dengan zona Most Replayed "
+                      "harus mendapat virality_score LEBIH TINGGI (+1 sampai +2 poin).")
+        
+        return "\n".join(lines)
+    
+    def boost_highlights_with_heatmap(self, highlights: list) -> list:
+        """Post-process highlights: boost virality_score based on heatmap overlap.
+        
+        Scoring rules:
+        - Heatmap avg >= 0.7 (very hot zone): +2 to virality_score  
+        - Heatmap avg >= 0.5 (warm zone): +1 to virality_score
+        - Heatmap avg < 0.3 (cold zone): -1 to virality_score
+        - Cap at 10, floor at 1
+        """
+        if not self.heatmap_data or not self.use_heatmap:
+            return highlights
+        
+        for h in highlights:
+            try:
+                start_sec = self.parse_timestamp(h.get("start_time", "00:00:00,000"))
+                end_sec = self.parse_timestamp(h.get("end_time", "00:00:00,000"))
+            except:
+                continue
+            
+            avg_engagement = self.get_heatmap_score(start_sec, end_sec)
+            h["heatmap_score"] = round(avg_engagement, 3)
+            
+            original_score = h.get("virality_score", 5)
+            
+            if avg_engagement >= 0.7:
+                h["virality_score"] = min(10, original_score + 2)
+            elif avg_engagement >= 0.5:
+                h["virality_score"] = min(10, original_score + 1)
+            elif avg_engagement < 0.3:
+                h["virality_score"] = max(1, original_score - 1)
+            
+            if h["virality_score"] != original_score:
+                self.log(f"  📊 Heatmap boost: {h['title'][:40]} | "
+                        f"engagement={avg_engagement:.0%} | "
+                        f"score {original_score}→{h['virality_score']}")
+        
+        # Re-sort by boosted virality score
+        highlights.sort(key=lambda x: (-x.get("virality_score", 0), x.get("start_time", "")))
+        return highlights
     
     def find_highlights(self, transcript: str, video_info: dict, num_clips: int) -> list:
         """Find highlights using GPT or Gemini - with automatic chunking for long transcripts"""
@@ -1680,10 +2157,17 @@ Transcript:
         
         if use_chunking:
             self.log(f"  📦 Using chunked processing for long transcript")
-            return self._find_highlights_chunked(transcript, video_info, num_clips)
+            highlights = self._find_highlights_chunked(transcript, video_info, num_clips)
+        else:
+            # For shorter transcripts, use standard processing
+            highlights = self._find_highlights_single(transcript, video_info, num_clips, use_compact_prompt)
         
-        # For shorter transcripts, use standard processing
-        return self._find_highlights_single(transcript, video_info, num_clips, use_compact_prompt)
+        # Post-process: boost virality scores based on heatmap data
+        if self.heatmap_data and self.use_heatmap:
+            self.log("  📊 Applying heatmap score boosting...")
+            highlights = self.boost_highlights_with_heatmap(highlights)
+        
+        return highlights
     
     def _find_highlights_single(self, transcript: str, video_info: dict, num_clips: int, use_compact: bool = False) -> list:
         """Process a single transcript (not chunked)"""
@@ -1695,6 +2179,12 @@ Transcript:
 - Judul: {video_info.get('title', 'Unknown')}
 - Channel: {video_info.get('channel', 'Unknown')}
 - Deskripsi: {video_info.get('description', '')[:300]}"""
+        
+        # Add heatmap data to video context
+        heatmap_context = self.format_heatmap_for_prompt()
+        if heatmap_context:
+            video_context += f"\n\n{heatmap_context}"
+            self.log("  📊 Heatmap data injected into AI prompt")
         
         # Choose prompt based on token budget
         base_prompt = self.get_compact_prompt() if use_compact else self.system_prompt
@@ -1733,6 +2223,12 @@ Transcript:
             video_context = f"""INFO VIDEO:
 - Judul: {video_info.get('title', 'Unknown')}
 - Channel: {video_info.get('channel', 'Unknown')}"""
+        
+        # Add heatmap data to video context
+        heatmap_context = self.format_heatmap_for_prompt()
+        if heatmap_context:
+            video_context += f"\n\n{heatmap_context}"
+            self.log("  📊 Heatmap data injected into chunked AI prompts")
         
         all_highlights = []
         failed_chunks = []
@@ -1886,6 +2382,101 @@ Transcript:
                 f"4. You have sufficient credits/quota"
             )
     
+    def _parse_json_robust(self, text: str, silent: bool = False) -> list:
+        """Parse JSON with automatic repair for common LLM mistakes.
+        
+        Handles:
+        - Mismatched brackets: '] instead of }', '} instead of ]'
+        - Trailing commas before ] or }
+        - Missing closing brackets
+        - Single quotes instead of double quotes
+        - Unescaped newlines in strings
+        """
+        # Step 1: Try direct parse
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            pass
+        
+        # Step 2: Extract JSON array from surrounding text
+        match = re.search(r'\[.*\]', text, re.DOTALL)
+        if match:
+            text = match.group(0)
+            try:
+                return json.loads(text)
+            except json.JSONDecodeError:
+                pass
+        
+        # Step 3: Repair common LLM bracket mistakes
+        repaired = text
+        
+        # Fix "], at end of object (should be "},)
+        repaired = re.sub(r'\]\s*,\s*\n\s*\{', '},\n{', repaired)
+        # Fix "] at end of array item where } expected (but NOT the final ])
+        # Pattern: "value"], or "value"]  followed by newline then {
+        repaired = re.sub(r'"\]\s*,', '"},', repaired)
+        repaired = re.sub(r'"\]\s*\n\s*\{', '"},\n{', repaired)
+        # Fix trailing comma before ]
+        repaired = re.sub(r',\s*\]', ']', repaired)
+        # Fix trailing comma before }
+        repaired = re.sub(r',\s*\}', '}', repaired)
+        
+        try:
+            return json.loads(repaired)
+        except json.JSONDecodeError:
+            pass
+        
+        # Step 4: Single quotes -> double quotes
+        repaired2 = repaired.replace("'", '"')
+        try:
+            return json.loads(repaired2)
+        except json.JSONDecodeError:
+            pass
+        
+        # Step 5: Try to fix unbalanced brackets
+        open_braces = repaired.count('{')
+        close_braces = repaired.count('}')
+        open_brackets = repaired.count('[')
+        close_brackets = repaired.count(']')
+        
+        if open_braces > close_braces:
+            repaired += '}' * (open_braces - close_braces)
+        if open_brackets > close_brackets:
+            repaired += ']' * (open_brackets - close_brackets)
+        
+        try:
+            return json.loads(repaired)
+        except json.JSONDecodeError:
+            pass
+        
+        # Step 6: Last resort - extract individual objects and build array
+        try:
+            objects = []
+            for m in re.finditer(r'\{[^{}]*\}', repaired):
+                try:
+                    obj = json.loads(m.group(0))
+                    if "start_time" in obj and "end_time" in obj:
+                        objects.append(obj)
+                except json.JSONDecodeError:
+                    continue
+            
+            if objects:
+                if not silent:
+                    self.log(f"  ⚠ JSON repaired: extracted {len(objects)} highlights from malformed response")
+                return objects
+        except Exception:
+            pass
+        
+        # All attempts failed
+        if not silent:
+            self.log(f"\n❌ JSON Parse Error: could not repair LLM response")
+            self.log(f"\n📄 Full AI Response:\n{text}")
+        raise Exception(
+            f"Failed to parse AI response as JSON.\n"
+            f"The AI model returned malformed JSON that could not be repaired.\n"
+            f"Try running again - LLM outputs can vary between attempts."
+        )
+    
     def _parse_highlights_result(self, result: str, num_clips: int, silent: bool = False) -> list:
         """Parse AI response into highlights list"""
         if not silent:
@@ -1895,13 +2486,7 @@ Transcript:
             result = re.sub(r"```json?\n?", "", result)
             result = re.sub(r"```\n?", "", result)
         
-        try:
-            highlights = json.loads(result)
-        except json.JSONDecodeError as e:
-            if not silent:
-                self.log(f"\n❌ JSON Parse Error: {e}")
-                self.log(f"\n📄 Full GPT Response:\n{result}")
-            raise Exception(f"Failed to parse GPT response as JSON: {e}")
+        highlights = self._parse_json_robust(result, silent)
         
         # Filter by duration (min 58s, max 120s)
         valid = []
@@ -2209,6 +2794,7 @@ Transcript:
     
     def convert_to_portrait_opencv(self, input_path: str, output_path: str):
         """Convert landscape to 9:16 portrait with speaker tracking (OpenCV Haar Cascade)"""
+        _ensure_cv2()
         
         cap = cv2.VideoCapture(input_path)
         orig_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -2403,6 +2989,7 @@ Transcript:
     
     def convert_to_portrait_mediapipe(self, input_path: str, output_path: str):
         """Convert landscape to 9:16 portrait with active speaker detection (MediaPipe)"""
+        _ensure_cv2()
         
         # Initialize MediaPipe
         self._init_mediapipe()
@@ -3176,6 +3763,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     
     def convert_to_portrait_opencv_with_progress(self, input_path: str, output_path: str, progress_callback):
         """Convert landscape to 9:16 portrait with speaker tracking and progress (OpenCV)"""
+        _ensure_cv2()
         
         self.log("[DEBUG] Starting portrait conversion...")
         print("[DEBUG] Starting portrait conversion...")
@@ -3390,6 +3978,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     
     def convert_to_portrait_mediapipe_with_progress(self, input_path: str, output_path: str, progress_callback):
         """Convert landscape to 9:16 portrait with active speaker detection and progress (MediaPipe)"""
+        _ensure_cv2()
         
         # Initialize MediaPipe
         self._init_mediapipe()
@@ -4351,7 +4940,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             "highlights": highlights,
             "video_info": video_info,
             "created_at": datetime.now().isoformat(),
-            "status": "highlights_found"
+            "status": "highlights_found",
+            "heatmap_available": self.heatmap_data is not None,
+            "heatmap_peaks": self.get_heatmap_peaks() if self.heatmap_data else []
         }
         
         with open(session_data_file, "w", encoding="utf-8") as f:

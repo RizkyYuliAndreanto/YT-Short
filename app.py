@@ -35,6 +35,10 @@ from pages.clipping_page import ClippingPage
 from pages.contact_page import ContactPage
 from pages.highlight_selection_page import HighlightSelectionPage
 from pages.session_browser_page import SessionBrowserPage
+# New V2 pages with redesigned UI
+from pages.landing_page_v2 import LandingPage
+from pages.dubbing_studio_page_v2 import DubbingStudioPage
+from pages.youtube_clipper_page import YouTubeClipperPage
 
 # Fix for PyInstaller windowed mode (console=False)
 # When built with console=False, sys.stdout and sys.stderr are None
@@ -77,8 +81,9 @@ class YTShortClipperApp(ctk.CTk):
         self.session_data = None  # Will store result from find_highlights_only
         
         self.title("YT Short Clipper")
-        self.geometry("780x620")
-        self.resizable(False, False)
+        self.geometry("900x700")
+        self.minsize(800, 600)
+        self.resizable(True, True)
         
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
@@ -89,8 +94,30 @@ class YTShortClipperApp(ctk.CTk):
         self.container = ctk.CTkFrame(self)
         self.container.pack(fill="both", expand=True)
         
+        # Initialize shared state variables (used by home/clipper page)
+        self.url_var = ctk.StringVar()
+        self.subtitle_var = ctk.StringVar(value="id - Indonesian")
+        self.clips_var = ctk.StringVar(value="5")
+        self.subtitle_loaded = False
+        
+        # Load icons for buttons (used by multiple pages)
+        try:
+            play_img = Image.open(ASSETS_DIR / "play.png")
+            play_img.thumbnail((20, 20), Image.Resampling.LANCZOS)
+            self.play_icon = ctk.CTkImage(light_image=play_img, dark_image=play_img, size=(20, 20))
+            
+            refresh_img = Image.open(ASSETS_DIR / "refresh.png")
+            refresh_img.thumbnail((20, 20), Image.Resampling.LANCZOS)
+            self.refresh_icon = ctk.CTkImage(light_image=refresh_img, dark_image=refresh_img, size=(20, 20))
+        except Exception as e:
+            debug_log(f"Icon load error: {e}")
+            self.play_icon = None
+            self.refresh_icon = None
+        
         self.pages = {}
+        self.create_landing_page()
         self.create_home_page()
+        self.create_dubbing_studio_page()
         self.create_processing_page()
         self.create_clipping_page()
         self.create_highlight_selection_page()
@@ -102,15 +129,15 @@ class YTShortClipperApp(ctk.CTk):
         self.create_lib_status_page()
         self.create_contact_page()
         
-        self.show_page("home")
+        self.show_page("landing")
         self.load_config()
         self.check_youtube_status()
         
         # Update start button state based on cookies
         self.update_start_button_state()
         
-        # Check for updates on startup
-        threading.Thread(target=self.check_update_silent, daemon=True).start()
+        # Auto update check disabled - use manual check from Settings > About if needed
+        # threading.Thread(target=self.check_update_silent, daemon=True).start()
     
     def set_app_icon(self):
         """Set window icon"""
@@ -154,182 +181,48 @@ class YTShortClipperApp(ctk.CTk):
         # Reset home page state when returning to home
         if name == "home":
             self.reset_home_page()
+        
+        # Refresh dubbing studio scroll when navigated to
+        if name == "dubbing_studio":
+            self.pages["dubbing_studio"].refresh_ui()
     
     def reset_home_page(self):
         """Reset home page to initial state"""
         # Clear URL input
         self.url_var.set("")
         
-        # Reset thumbnail - recreate preview placeholder
+        # Reset thumbnail state
         self.current_thumbnail = None
-        self.create_preview_placeholder()
         
-        # Reset subtitle state (keep visible but disabled)
+        # Reset subtitle state
         self.subtitle_loaded = False
-        self.subtitle_loading.pack_forget()
-        self.subtitle_dropdown.configure(state="disabled", values=["id - Indonesian"])
         self.subtitle_var.set("id - Indonesian")
         
         # Reset clips input to default
         self.clips_var.set("5")
         
-        # Update start button state
-        self.update_start_button_state()
-
+        # Reset home page widgets if they exist
+        home = self.pages.get("home")
+        if home and hasattr(home, '_reset_preview'):
+            home._reset_preview()
+        if home and hasattr(home, 'subtitle_dropdown'):
+            home.subtitle_dropdown.configure(state="disabled", values=["id - Indonesian"])
+            home.subtitle_loaded = False
+        
     def create_home_page(self):
-        page = ctk.CTkFrame(self.container, fg_color=("#1a1a1a", "#0a0a0a"))
+        """Create the YouTube Clipper home page using the new redesigned UI"""
+        page = YouTubeClipperPage(self.container, self, self.config)
         self.pages["home"] = page
         
-        # Import header and footer components
-        from components.page_layout import PageHeader, PageFooter
-        
-        # Top header
-        header = PageHeader(page, self, show_nav_buttons=True)
-        header.pack(fill="x", padx=20, pady=(15, 10))
-        
-        # Load icons for buttons
-        try:
-            play_img = Image.open(ASSETS_DIR / "play.png")
-            play_img.thumbnail((20, 20), Image.Resampling.LANCZOS)
-            self.play_icon = ctk.CTkImage(light_image=play_img, dark_image=play_img, size=(20, 20))
-            
-            refresh_img = Image.open(ASSETS_DIR / "refresh.png")
-            refresh_img.thumbnail((20, 20), Image.Resampling.LANCZOS)
-            self.refresh_icon = ctk.CTkImage(light_image=refresh_img, dark_image=refresh_img, size=(20, 20))
-        except Exception as e:
-            debug_log(f"Icon load error: {e}")
-            self.play_icon = None
-            self.refresh_icon = None
-        
-        # ===== TOP ROW: Left config + Right thumbnail =====
-        top_row = ctk.CTkFrame(page, fg_color="transparent")
-        top_row.pack(fill="x", padx=20, pady=(5, 10))
-        
-        # Left column - URL, Subtitle, Clip Count
-        left_col = ctk.CTkFrame(top_row, fg_color="transparent")
-        left_col.pack(side="left", fill="y", padx=(0, 20))
-        
-        # YouTube URL
-        ctk.CTkLabel(left_col, text="YouTube URL", font=ctk.CTkFont(size=11, weight="bold"), 
-            anchor="w").pack(fill="x", pady=(0, 3))
-        
-        url_input_container = ctk.CTkFrame(left_col, fg_color="transparent")
-        url_input_container.pack(fill="x", pady=(0, 8))
-        
-        self.url_var = ctk.StringVar()
-        self.url_var.trace("w", self.on_url_change)
-        self.url_entry = ctk.CTkEntry(url_input_container, textvariable=self.url_var, 
-            placeholder_text="Paste YouTube link...", width=220, height=32, border_width=1,
-            border_color=("#3a3a3a", "#2a2a2a"), fg_color=("#1a1a1a", "#0a0a0a"))
-        self.url_entry.pack(side="left", padx=(0, 5))
-        
-        self.paste_btn = ctk.CTkButton(url_input_container, text="📋 Paste", width=65, height=32,
-            fg_color=("#3a3a3a", "#2a2a2a"), hover_color=("#4a4a4a", "#3a3a3a"),
-            font=ctk.CTkFont(size=10), command=self.paste_url)
-        self.paste_btn.pack(side="left")
-        
-        # Subtitle Language
-        ctk.CTkLabel(left_col, text="Subtitle Language", font=ctk.CTkFont(size=11, weight="bold"), 
-            anchor="w").pack(fill="x", pady=(3, 3))
-        
-        self.subtitle_frame = ctk.CTkFrame(left_col, fg_color="transparent")
-        self.subtitle_frame.pack(fill="x", pady=(0, 8))
-        self.subtitle_loaded = False
-        
-        self.subtitle_var = ctk.StringVar(value="id - Indonesian")
-        self.subtitle_dropdown = ctk.CTkOptionMenu(self.subtitle_frame, 
-            variable=self.subtitle_var, values=["id - Indonesian"], width=290,
-            height=32, fg_color=("#2b2b2b", "#1a1a1a"),
-            button_color=("#3a3a3a", "#2a2a2a"), button_hover_color=("#4a4a4a", "#3a3a3a"),
-            state="disabled")
-        self.subtitle_dropdown.pack(anchor="w")
-        
-        self.subtitle_loading = ctk.CTkLabel(self.subtitle_frame, text="⏳ Loading...", 
-            font=ctk.CTkFont(size=10), text_color="gray")
-        
-        # Clip Count
-        ctk.CTkLabel(left_col, text="Clip Count", font=ctk.CTkFont(size=11, weight="bold"), 
-            anchor="w").pack(fill="x", pady=(3, 3))
-        
-        clips_input_frame = ctk.CTkFrame(left_col, fg_color="transparent")
-        clips_input_frame.pack(fill="x", pady=(0, 5))
-        
-        self.clips_var = ctk.StringVar(value="5")
-        clips_entry = ctk.CTkEntry(clips_input_frame, textvariable=self.clips_var, width=60, height=32,
-            fg_color=("#2b2b2b", "#1a1a1a"), border_width=1, border_color=("#3a3a3a", "#2a2a2a"), justify="center")
-        clips_entry.pack(side="left", padx=(0, 8))
-        
-        ctk.CTkLabel(clips_input_frame, text="(1-10)", font=ctk.CTkFont(size=10), 
-            text_color="gray").pack(side="left")
-        
-        # Right column - Thumbnail 16:9
-        right_col = ctk.CTkFrame(top_row, fg_color="transparent")
-        right_col.pack(side="right", fill="y")
-        
-        # Video preview frame 16:9 (400x225)
-        self.thumb_frame = ctk.CTkFrame(right_col, width=400, height=225, 
-            fg_color=("#2b2b2b", "#1a1a1a"), corner_radius=8)
-        self.thumb_frame.pack(anchor="ne")
-        self.thumb_frame.pack_propagate(False)
-        
-        self.create_preview_placeholder()
-        
-        # ===== MIDDLE ROW: Cookies only (full width) =====
-        middle_row = ctk.CTkFrame(page, fg_color="transparent")
-        middle_row.pack(fill="x", padx=20, pady=(0, 10))
-        
-        # YouTube Cookies card (full width)
-        cookies_frame = ctk.CTkFrame(middle_row, fg_color=("#2b2b2b", "#1a1a1a"), corner_radius=8)
-        cookies_frame.pack(fill="x")
-        
-        ctk.CTkLabel(cookies_frame, text="YouTube Cookies", font=ctk.CTkFont(size=11, weight="bold"), 
-            anchor="w").pack(fill="x", padx=12, pady=(10, 5))
-        
-        self.cookies_status_label = ctk.CTkLabel(cookies_frame, text="🍪 No cookies", 
-            font=ctk.CTkFont(size=10), anchor="w", text_color="gray")
-        self.cookies_status_label.pack(fill="x", padx=12, pady=(0, 5))
-        
-        upload_cookies_btn = ctk.CTkButton(cookies_frame, text="📁 Upload", height=28,
-            fg_color=("#3a3a3a", "#2a2a2a"), hover_color=("#4a4a4a", "#3a3a3a"),
-            font=ctk.CTkFont(size=10), command=self.upload_cookies)
-        upload_cookies_btn.pack(fill="x", padx=12, pady=(0, 10))
-        
-        # ===== BOTTOM: Generate button + Browse =====
-        bottom_section = ctk.CTkFrame(page, fg_color="transparent")
-        bottom_section.pack(fill="x", padx=20, pady=(0, 5))
-        
-        self.start_btn = ctk.CTkButton(bottom_section, text="Find Highlights", image=self.play_icon, 
-            compound="left", font=ctk.CTkFont(size=13, weight="bold"),
-            height=40, command=self.start_processing, state="disabled", 
-            fg_color="gray", hover_color="gray", corner_radius=8)
-        self.start_btn.pack(fill="x", pady=(0, 5))
-        
-        sessions_link = ctk.CTkLabel(bottom_section, text="📋 Browse Sessions", 
-            font=ctk.CTkFont(size=10), text_color=("#3B8ED0", "#1F6AA5"), cursor="hand2")
-        sessions_link.pack()
-        sessions_link.bind("<Button-1>", lambda e: self.show_page("session_browser"))
-        
-        # ===== LIB STATUS =====
-        self.lib_status_frame = ctk.CTkFrame(page, fg_color="transparent")
-        self.lib_status_frame.pack(fill="x", padx=20, pady=(5, 0))
-        
-        self.lib_status_label = ctk.CTkLabel(self.lib_status_frame, text="", 
-            font=ctk.CTkFont(size=10), cursor="hand2")
-        self.lib_status_label.pack()
-        self.lib_status_label.bind("<Button-1>", lambda e: self.show_page("lib_status"))
-        
-        # Check and update lib status
-        self.check_lib_status()
-        
-        # Check cookies status
-        self.check_cookies_status()
-        
-        # Footer
-        footer = PageFooter(page, self)
-        footer.pack(fill="x", padx=20, pady=(5, 8), side="bottom")
+        # Store reference to home page for compatibility
+        self.home_page = page
     
     def create_preview_placeholder(self):
-        """Create placeholder content for video preview"""
+        """Create placeholder content for video preview - legacy method"""
+        # Check if old widget exists (backward compat)
+        if not hasattr(self, 'thumb_frame') or self.thumb_frame is None:
+            return
+        
         # Clear existing content
         for widget in self.thumb_frame.winfo_children():
             widget.destroy()
@@ -464,18 +357,20 @@ class YTShortClipperApp(ctk.CTk):
     def check_cookies_status(self):
         """Check if cookies.txt exists and update UI"""
         if self.cookies_path.exists():
-            self.cookies_status_label.configure(
-                text="✅ cookies.txt loaded",
-                text_color=("#27ae60", "#2ecc71")  # Green
-            )
+            if hasattr(self, 'cookies_status_label') and self.cookies_status_label:
+                self.cookies_status_label.configure(
+                    text="✅ cookies.txt loaded",
+                    text_color=("#27ae60", "#2ecc71")  # Green
+                )
             # Update start button state when cookies status changes
             self.update_start_button_state()
             return True
         else:
-            self.cookies_status_label.configure(
-                text="🍪 No cookies.txt found",
-                text_color="gray"
-            )
+            if hasattr(self, 'cookies_status_label') and self.cookies_status_label:
+                self.cookies_status_label.configure(
+                    text="🍪 No cookies.txt found",
+                    text_color="gray"
+                )
             # Update start button state when cookies status changes
             self.update_start_button_state()
             return False
@@ -581,6 +476,22 @@ class YTShortClipperApp(ctk.CTk):
             lambda: self.show_page("home")
         )
     
+    def create_landing_page(self):
+        """Create landing page with mode selection cards"""
+        self.pages["landing"] = LandingPage(
+            self.container,
+            self,
+            self.config
+        )
+    
+    def create_dubbing_studio_page(self):
+        """Create AI Dubbing Studio page"""
+        self.pages["dubbing_studio"] = DubbingStudioPage(
+            self.container,
+            self,
+            self.config
+        )
+    
     def load_config(self):
         # Try new AI providers system first (with .env support)
         ai_providers = self.config.get_resolved_ai_providers()
@@ -680,6 +591,7 @@ class YTShortClipperApp(ctk.CTk):
             return self.client
     
     def on_url_change(self, *args):
+        """Handle URL input change - legacy method for old home page"""
         url = self.url_var.get().strip()
         video_id = extract_video_id(url)
         if video_id:
@@ -692,29 +604,38 @@ class YTShortClipperApp(ctk.CTk):
             self.subtitle_loaded = False
             # Recreate placeholder
             self.create_preview_placeholder()
-            # Reset subtitle dropdown to disabled state
-            self.subtitle_loading.pack_forget()
-            self.subtitle_dropdown.configure(state="disabled", values=["id - Indonesian"])
+            # Reset subtitle dropdown to disabled state (legacy widgets)
+            if hasattr(self, 'subtitle_loading') and self.subtitle_loading:
+                self.subtitle_loading.pack_forget()
+            if hasattr(self, 'subtitle_dropdown') and self.subtitle_dropdown:
+                self.subtitle_dropdown.configure(state="disabled", values=["id - Indonesian"])
             self.subtitle_var.set("id - Indonesian")
             # Disable start button when URL is invalid or cookies missing
             self.update_start_button_state()
     
     def update_start_button_state(self):
         """Update start button state based on URL, cookies, and library validation"""
+        # Skip if using new home page (it handles its own state)
+        if not hasattr(self, 'start_btn') or self.start_btn is None:
+            return
+            
         has_cookies = self.cookies_path.exists()
         libs_ok = getattr(self, 'libs_installed', True)  # Default True if not checked yet
         
         # Always keep paste button enabled (so user can see alert)
-        self.paste_btn.configure(state="normal")
+        if hasattr(self, 'paste_btn') and self.paste_btn:
+            self.paste_btn.configure(state="normal")
         
         # If no cookies, disable URL entry and start button
         if not has_cookies:
-            self.url_entry.configure(state="disabled")
+            if hasattr(self, 'url_entry') and self.url_entry:
+                self.url_entry.configure(state="disabled")
             self.start_btn.configure(state="disabled", fg_color="gray", hover_color="gray")
             return
         
         # Cookies exist - enable URL input
-        self.url_entry.configure(state="normal")
+        if hasattr(self, 'url_entry') and self.url_entry:
+            self.url_entry.configure(state="normal")
         
         # Check if URL is valid, subtitle is loaded, and libs are installed
         url = self.url_var.get().strip()
@@ -740,6 +661,10 @@ class YTShortClipperApp(ctk.CTk):
         
         all_ok = ffmpeg_ok and deno_ok and ytdlp_ok
         self.libs_installed = all_ok
+        
+        # Skip UI update if old widgets don't exist
+        if not hasattr(self, 'lib_status_frame') or self.lib_status_frame is None:
+            return
         
         if all_ok:
             # All installed - hide lib status
@@ -848,18 +773,24 @@ class YTShortClipperApp(ctk.CTk):
         threading.Thread(target=fetch, daemon=True).start()
     
     def show_subtitle_loading(self):
-        """Show loading state for subtitle selector"""
+        """Show loading state for subtitle selector - legacy method"""
+        # Skip if old widgets don't exist
+        if not hasattr(self, 'subtitle_dropdown') or self.subtitle_dropdown is None:
+            return
         # Keep dropdown visible but show loading indicator
         self.subtitle_dropdown.configure(state="disabled")
-        self.subtitle_loading.pack(fill="x", padx=(4, 8), pady=(4, 0))
+        if hasattr(self, 'subtitle_loading') and self.subtitle_loading:
+            self.subtitle_loading.pack(fill="x", padx=(4, 8), pady=(4, 0))
     
     def on_subtitle_error(self, error: str):
         """Handle subtitle fetch error"""
         debug_log(f"Subtitle fetch error: {error}")
         self.subtitle_loaded = False
-        # Hide loading, keep dropdown disabled
-        self.subtitle_loading.pack_forget()
-        self.subtitle_dropdown.configure(state="disabled")
+        # Hide loading, keep dropdown disabled (legacy widgets)
+        if hasattr(self, 'subtitle_loading') and self.subtitle_loading:
+            self.subtitle_loading.pack_forget()
+        if hasattr(self, 'subtitle_dropdown') and self.subtitle_dropdown:
+            self.subtitle_dropdown.configure(state="disabled")
         # Show error to user
         messagebox.showerror("Subtitle Error", f"Failed to fetch subtitles:\n\n{error}")
         # Update button state
@@ -867,8 +798,9 @@ class YTShortClipperApp(ctk.CTk):
     
     def show_subtitle_selector(self, subtitles: list):
         """Show subtitle selector with available options"""
-        # Hide loading
-        self.subtitle_loading.pack_forget()
+        # Hide loading (legacy)
+        if hasattr(self, 'subtitle_loading') and self.subtitle_loading:
+            self.subtitle_loading.pack_forget()
         
         # Create dropdown options
         options = [f"{sub['code']} - {sub['name']}" for sub in subtitles]
@@ -881,7 +813,8 @@ class YTShortClipperApp(ctk.CTk):
                 break
         
         self.subtitle_var.set(default_value)
-        self.subtitle_dropdown.configure(values=options, state="normal")
+        if hasattr(self, 'subtitle_dropdown') and self.subtitle_dropdown:
+            self.subtitle_dropdown.configure(values=options, state="normal")
         
         # Mark subtitles as loaded
         self.subtitle_loaded = True
@@ -890,6 +823,10 @@ class YTShortClipperApp(ctk.CTk):
         self.update_start_button_state()
     
     def load_thumbnail(self, video_id: str):
+        # Skip if old widgets don't exist
+        if not hasattr(self, 'thumb_frame') or self.thumb_frame is None:
+            return
+            
         def fetch():
             try:
                 import ssl
@@ -935,23 +872,30 @@ class YTShortClipperApp(ctk.CTk):
         # Clear image reference properly before loading new one
         self.current_thumbnail = None
         
-        # Show loading state
-        for widget in self.thumb_frame.winfo_children():
-            widget.destroy()
+        # Show loading state (legacy widgets)
+        if hasattr(self, 'thumb_frame') and self.thumb_frame:
+            for widget in self.thumb_frame.winfo_children():
+                widget.destroy()
+            
+            loading_container = ctk.CTkFrame(self.thumb_frame, fg_color="transparent")
+            loading_container.place(relx=0.5, rely=0.5, anchor="center")
+            
+            self.thumb_label = ctk.CTkLabel(loading_container, text="Loading...", 
+                font=ctk.CTkFont(size=13), text_color="gray")
+            self.thumb_label.pack()
         
-        loading_container = ctk.CTkFrame(self.thumb_frame, fg_color="transparent")
-        loading_container.place(relx=0.5, rely=0.5, anchor="center")
-        
-        self.thumb_label = ctk.CTkLabel(loading_container, text="Loading...", 
-            font=ctk.CTkFont(size=13), text_color="gray")
-        self.thumb_label.pack()
-        
-        self.start_btn.configure(state="disabled", fg_color="gray", hover_color="gray")
+        if hasattr(self, 'start_btn') and self.start_btn:
+            self.start_btn.configure(state="disabled", fg_color="gray", hover_color="gray")
         threading.Thread(target=fetch, daemon=True).start()
     
     def on_thumbnail_error(self):
         # Clear image reference properly before showing error
         self.current_thumbnail = None
+        
+        # Skip if old widgets don't exist
+        if not hasattr(self, 'thumb_frame') or self.thumb_frame is None:
+            return
+            
         # Recreate placeholder with error message
         for widget in self.thumb_frame.winfo_children():
             widget.destroy()
@@ -964,10 +908,15 @@ class YTShortClipperApp(ctk.CTk):
             font=ctk.CTkFont(size=13), text_color="gray", justify="center")
         self.thumb_label.pack()
         
-        self.start_btn.configure(state="disabled", fg_color="gray", hover_color="gray")
+        if hasattr(self, 'start_btn') and self.start_btn:
+            self.start_btn.configure(state="disabled", fg_color="gray", hover_color="gray")
     
     def show_thumbnail(self, img):
         try:
+            # Skip if old widgets don't exist
+            if not hasattr(self, 'thumb_frame') or self.thumb_frame is None:
+                return
+                
             # Clear the preview container and show thumbnail
             for widget in self.thumb_frame.winfo_children():
                 widget.destroy()
@@ -988,8 +937,9 @@ class YTShortClipperApp(ctk.CTk):
             self.update_start_button_state()
 
     def start_processing(self):
-        # Disable button during validation
-        self.start_btn.configure(state="disabled", text="Validating...")
+        # Disable button during validation (if legacy widget exists)
+        if hasattr(self, 'start_btn') and self.start_btn:
+            self.start_btn.configure(state="disabled", text="Validating...")
         
         def validate_and_start():
             try:
@@ -1049,12 +999,14 @@ class YTShortClipperApp(ctk.CTk):
     
     def _on_validation_failed(self, error_msg):
         """Handle validation failure"""
-        self.start_btn.configure(state="normal", text="Find Highlights")
+        if hasattr(self, 'start_btn') and self.start_btn:
+            self.start_btn.configure(state="normal", text="Find Highlights")
         messagebox.showerror("Validation Failed", error_msg)
     
     def _start_processing_validated(self):
         """Start processing after validation passed"""
-        self.start_btn.configure(state="normal", text="Find Highlights")
+        if hasattr(self, 'start_btn') and self.start_btn:
+            self.start_btn.configure(state="normal", text="Find Highlights")
         
         # Legacy validation (backward compatibility)
         if not self.client:
@@ -1067,10 +1019,10 @@ class YTShortClipperApp(ctk.CTk):
             return
         try:
             num_clips = int(self.clips_var.get())
-            if not 1 <= num_clips <= 10:
+            if not 1 <= num_clips <= 50:
                 raise ValueError()
         except:
-            messagebox.showerror("Error", "Clips must be 1-10!")
+            messagebox.showerror("Error", "Clips must be 1-50!")
             return
         
         # Get selected subtitle language (extract code from "id - Indonesian" format)
@@ -1151,6 +1103,7 @@ class YTShortClipperApp(ctk.CTk):
             if gpu_settings.get("enabled", False):
                 core.enable_gpu_acceleration(True)
             
+            core.use_heatmap = getattr(self, 'use_heatmap', True)
             core.process(url, num_clips, add_captions=add_captions, add_hook=add_hook)
             if not self.cancelled:
                 self.after(0, self.on_complete)
@@ -1172,6 +1125,10 @@ class YTShortClipperApp(ctk.CTk):
     def update_progress(self, status, progress):
         print(f"[DEBUG] update_progress called: status='{status}', progress={progress}")
         self.pages["processing"].update_status(status)
+        
+        # Check if steps UI is available
+        if not hasattr(self, 'steps') or len(self.steps) < 3:
+            return  # Skip step updates if UI not ready
         
         # Update step indicators based on status text
         status_lower = status.lower()
@@ -1262,6 +1219,7 @@ class YTShortClipperApp(ctk.CTk):
             )
             
             # Call find_highlights_only (returns session data)
+            core.use_heatmap = getattr(self, 'use_heatmap', True)
             result = core.find_highlights_only(url, num_clips)
             
             if not self.cancelled and result:
@@ -1619,10 +1577,23 @@ class YTShortClipperApp(ctk.CTk):
 
 def handle_exception(exc_type, exc_value, exc_traceback):
     """Global exception handler to log uncaught exceptions"""
+    import traceback as tb
+    
     # Don't log KeyboardInterrupt
     if issubclass(exc_type, KeyboardInterrupt):
         sys.__excepthook__(exc_type, exc_value, exc_traceback)
         return
+    
+    # Print full traceback to terminal (for debugging)
+    try:
+        print("\n" + "="*60, file=sys.__stderr__)
+        print("UNCAUGHT EXCEPTION - Full Traceback:", file=sys.__stderr__)
+        print("="*60, file=sys.__stderr__)
+        tb.print_exception(exc_type, exc_value, exc_traceback, file=sys.__stderr__)
+        print("="*60 + "\n", file=sys.__stderr__)
+        sys.__stderr__.flush()
+    except:
+        pass
     
     # Log the exception
     log_error("Uncaught exception", exc_value)

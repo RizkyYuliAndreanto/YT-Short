@@ -34,16 +34,26 @@ def setup_error_logging(app_dir: Path):
 
 
 class ErrorLogWriter:
-    """Custom writer that writes to both file and devnull"""
+    """Custom writer that writes to both file and terminal (when in debug mode)"""
     
     def __init__(self, log_file: Path):
         self.log_file = log_file
         self.terminal = sys.__stderr__  # Keep reference to original stderr
     
     def write(self, message):
-        """Write message to log file"""
+        """Write message to log file and terminal"""
         if message.strip():  # Only write non-empty messages
             try:
+                # Also print to terminal in debug mode
+                if DEBUG_MODE and self.terminal:
+                    try:
+                        self.terminal.write(message)
+                        if not message.endswith('\n'):
+                            self.terminal.write('\n')
+                        self.terminal.flush()
+                    except:
+                        pass
+                
                 with open(self.log_file, 'a', encoding='utf-8') as f:
                     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     f.write(f"[{timestamp}] {message}")
@@ -54,7 +64,11 @@ class ErrorLogWriter:
     
     def flush(self):
         """Flush - required for file-like object"""
-        pass
+        if self.terminal:
+            try:
+                self.terminal.flush()
+            except:
+                pass
 
 
 def debug_log(msg):

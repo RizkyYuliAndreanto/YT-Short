@@ -210,6 +210,18 @@ class HighlightSelectionPage(ctk.CTkFrame):
             ctk.CTkLabel(top_row, text=f"{score_emoji} {virality}/10",
                 font=ctk.CTkFont(size=11, weight="bold"), text_color=score_color).pack(side="right", padx=(10, 0))
             
+            # Heatmap score badge (if available)
+            heatmap_score = highlight.get("heatmap_score", 0)
+            if heatmap_score > 0:
+                if heatmap_score >= 0.7:
+                    hm_color = "#27ae60"
+                elif heatmap_score >= 0.4:
+                    hm_color = "#f39c12"
+                else:
+                    hm_color = "#95a5a6"
+                ctk.CTkLabel(top_row, text=f"📊 {heatmap_score:.0%}",
+                    font=ctk.CTkFont(size=11, weight="bold"), text_color=hm_color).pack(side="right", padx=(6, 0))
+            
             # Description
             description = highlight.get("description", "")
             if description:

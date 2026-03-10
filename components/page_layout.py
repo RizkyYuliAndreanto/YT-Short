@@ -28,9 +28,16 @@ class PageHeader(ctk.CTkFrame):
             left_frame = ctk.CTkFrame(self, fg_color="transparent")
             left_frame.pack(side="left")
             
+            # Determine back destination - landing page for most sub-pages
+            def go_back():
+                if hasattr(self.app, 'go_back'):
+                    self.app.go_back()
+                elif hasattr(self.app, 'show_page'):
+                    self.app.show_page("landing")
+            
             ctk.CTkButton(left_frame, text="←", width=40, fg_color="transparent", 
                 hover_color=("gray75", "gray25"), 
-                command=self.app.on_back if hasattr(self.app, 'on_back') else lambda: self.app.show_page("home")).pack(side="left")
+                command=go_back).pack(side="left")
             ctk.CTkLabel(left_frame, text=self.page_title, font=ctk.CTkFont(size=22, weight="bold")).pack(side="left", padx=10)
             
             # Right side: Logo + tagline
