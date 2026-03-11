@@ -2142,8 +2142,15 @@ Transcript:
         highlights.sort(key=lambda x: (-x.get("virality_score", 0), x.get("start_time", "")))
         return highlights
     
-    def find_highlights(self, transcript: str, video_info: dict, num_clips: int) -> list:
-        """Find highlights using GPT or Gemini - with automatic chunking for long transcripts"""
+    def find_highlights(self, transcript: str, video_info: dict, num_clips: int,
+                         min_duration: float = 58, max_duration: float = 120,
+                         force_system_prompt: bool = False) -> list:
+        """Find highlights using GPT or Gemini - with automatic chunking for long transcripts.
+        
+        Args:
+            force_system_prompt: If True, always use self.system_prompt instead of compact prompt.
+                                 Used by ClipDubEngine to preserve context-aware prompts.
+        """
         self.log(f"[2/4] Finding highlights (using {self.model})...")
         
         # Estimate token count
@@ -2153,14 +2160,20 @@ Transcript:
         # Check if we need chunking (GROQ free tier limit: 12000 TPM)
         # Use 8000 as threshold to leave room for prompt + response
         use_chunking = estimated_tokens > 8000
-        use_compact_prompt = estimated_tokens > 5000
+        use_compact_prompt = estimated_tokens > 5000 and not force_system_prompt
+        
+        if force_system_prompt:
+            self.log(f"  🎯 Using custom system prompt (context-aware mode)")
         
         if use_chunking:
             self.log(f"  📦 Using chunked processing for long transcript")
-            highlights = self._find_highlights_chunked(transcript, video_info, num_clips)
+            highlights = self._find_highlights_chunked(transcript, video_info, num_clips,
+                                                       min_duration=min_duration, max_duration=max_duration,
+                                                       force_system_prompt=force_system_prompt)
         else:
             # For shorter transcripts, use standard processing
-            highlights = self._find_highlights_single(transcript, video_info, num_clips, use_compact_prompt)
+            highlights = self._find_highlights_single(transcript, video_info, num_clips, use_compact_prompt,
+                                                      min_duration=min_duration, max_duration=max_duration)
         
         # Post-process: boost virality scores based on heatmap data
         if self.heatmap_data and self.use_heatmap:
@@ -2169,9 +2182,12 @@ Transcript:
         
         return highlights
     
-    def _find_highlights_single(self, transcript: str, video_info: dict, num_clips: int, use_compact: bool = False) -> list:
+    def _find_highlights_single(self, transcript: str, video_info: dict, num_clips: int, use_compact: bool = False,
+                                  min_duration: float = 58, max_duration: float = 120) -> list:
         """Process a single transcript (not chunked)"""
-        request_clips = num_clips + 3
+        # Request more than needed — many get filtered by duration
+        # When using custom system prompt (use_compact=False due to force), request less overhead
+        request_clips = max(num_clips + 3, int(num_clips * 1.5)) if not use_compact else max(num_clips + 5, int(num_clips * 2))
         
         video_context = ""
         if video_info:
@@ -2195,9 +2211,12 @@ Transcript:
         prompt = prompt.replace("{transcript}", transcript)
         
         result = self._call_ai_api(prompt)
-        return self._parse_highlights_result(result, num_clips)
+        return self._parse_highlights_result(result, num_clips,
+                                              min_duration=min_duration, max_duration=max_duration)
     
-    def _find_highlights_chunked(self, transcript: str, video_info: dict, num_clips: int) -> list:
+    def _find_highlights_chunked(self, transcript: str, video_info: dict, num_clips: int,
+                                  min_duration: float = 58, max_duration: float = 120,
+                                  force_system_prompt: bool = False) -> list:
         """
         Process long transcript in chunks with parallel API calls.
         Optimized for videos 3-12+ hours.
@@ -2230,6 +2249,11 @@ Transcript:
             video_context += f"\n\n{heatmap_context}"
             self.log("  📊 Heatmap data injected into chunked AI prompts")
         
+        # Use custom system prompt if forced (e.g., ClipDubEngine context-aware prompt)
+        use_custom = force_system_prompt and self.system_prompt
+        if use_custom:
+            self.log("  🎯 Using custom system prompt for chunked processing")
+        
         all_highlights = []
         failed_chunks = []
         
@@ -2239,14 +2263,15 @@ Transcript:
         def process_chunk(chunk_data):
             """Process a single chunk"""
             i, chunk = chunk_data
-            prompt = self.get_compact_prompt()
+            prompt = self.system_prompt if use_custom else self.get_compact_prompt()
             prompt = prompt.replace("{num_clips}", str(clips_per_chunk))
             prompt = prompt.replace("{video_context}", video_context)
             prompt = prompt.replace("{transcript}", chunk)
             
             try:
                 result = self._call_ai_api(prompt)
-                highlights = self._parse_highlights_result(result, clips_per_chunk, silent=True)
+                highlights = self._parse_highlights_result(result, clips_per_chunk, silent=True,
+                                                           min_duration=min_duration, max_duration=max_duration)
                 return (i, highlights, None)
             except Exception as e:
                 return (i, [], str(e)[:100])
@@ -2302,10 +2327,12 @@ Transcript:
         self.log(f"  ✓ Final unique highlights: {len(unique_highlights)}")
         return unique_highlights[:num_clips]
     
-    def _deduplicate_highlights(self, highlights: list, min_gap_seconds: int = 60) -> list:
+    def _deduplicate_highlights(self, highlights: list, min_gap_seconds: int = 10) -> list:
         """
         Remove duplicate/overlapping highlights.
         Keeps higher virality_score when timestamps overlap.
+        Only removes clips that actually OVERLAP in time range.
+        min_gap_seconds: minimum gap between clip START times (default 10s).
         """
         if not highlights:
             return []
@@ -2326,8 +2353,7 @@ Transcript:
                 except:
                     continue
                 
-                # Check for overlap or too close
-                # Overlap: start is within existing range, or existing start is within this range
+                # Check for actual time overlap (not just proximity)
                 overlaps = (ex_start <= start <= ex_end) or (start <= ex_start <= end)
                 too_close = abs(start - ex_start) < min_gap_seconds
                 
@@ -2477,7 +2503,8 @@ Transcript:
             f"Try running again - LLM outputs can vary between attempts."
         )
     
-    def _parse_highlights_result(self, result: str, num_clips: int, silent: bool = False) -> list:
+    def _parse_highlights_result(self, result: str, num_clips: int, silent: bool = False,
+                                  min_duration: float = 58, max_duration: float = 120) -> list:
         """Parse AI response into highlights list"""
         if not silent:
             self.log(f"  Raw AI response (first 500 chars):\n{result[:500]}")
@@ -2488,7 +2515,7 @@ Transcript:
         
         highlights = self._parse_json_robust(result, silent)
         
-        # Filter by duration (min 58s, max 120s)
+        # Filter by duration
         valid = []
         for h in highlights:
             # Fallback: convert "reason" to "description" if exists
@@ -2507,15 +2534,15 @@ Transcript:
             if "description" not in h:
                 h["description"] = h.get("title", "No description")
             
-            if 58 <= duration <= 120:
+            if min_duration <= duration <= max_duration:
                 valid.append(h)
                 if not silent:
                     virality = h.get("virality_score", 5)
                     self.log(f"  ✓ {h['title']} ({duration:.0f}s) [🔥 {virality}/10]")
             elif not silent:
-                if duration > 120:
+                if duration > max_duration:
                     self.log(f"  ✗ {h['title']} ({duration:.0f}s) - Too long, skipped")
-                elif duration < 58:
+                elif duration < min_duration:
                     self.log(f"  ✗ {h['title']} ({duration:.0f}s) - Too short, skipped")
         
         return valid[:num_clips]

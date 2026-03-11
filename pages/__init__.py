@@ -7,5 +7,6 @@ from .browse_page import BrowsePage
 from .results_page import ResultsPage
 from .status_pages import APIStatusPage, LibStatusPage
 from .processing_page import ProcessingPage
+from .clip_dub_page import ClipDubPage
 
-__all__ = ['SettingsPage', 'BrowsePage', 'ResultsPage', 'APIStatusPage', 'LibStatusPage', 'ProcessingPage']
+__all__ = ['SettingsPage', 'BrowsePage', 'ResultsPage', 'APIStatusPage', 'LibStatusPage', 'ProcessingPage', 'ClipDubPage']

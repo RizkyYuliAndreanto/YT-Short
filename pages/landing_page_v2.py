@@ -144,15 +144,15 @@ class LandingPage(ctk.CTkFrame):
         row2 = ctk.CTkFrame(parent, fg_color="transparent")
         row2.pack()
         
-        # Card 3: Multi-Clip Compiler
+        # Card 3: Clip+Dub Studio
         self._create_mode_card(row2,
-            icon="🎞️",
-            title="Multi-Clip Compiler",
-            description="Combine multiple clips into one video.\nAI generates unified voiceover script.",
+            icon="🎬",
+            title="Clip + Dub Studio",
+            description="Clip video panjang → AI script →\nDubbing otomatis jadi Shorts 1-2 menit.",
             accent_color=Colors.ACCENT_SECONDARY,  # Purple
-            command=lambda: self._show_coming_soon("Multi-Clip Compiler"),
-            tooltip="Merge 1-10 video clips with AI-generated narration",
-            badge="SOON"
+            command=lambda: self.app.show_page("clip_dub"),
+            tooltip="Gabungkan clipping + dubbing: input URL → AI pilih momen → script → TTS → Shorts",
+            badge="NEW"
         )
         
         # Card 4: Shopping Video Creator

@@ -39,6 +39,7 @@ from pages.session_browser_page import SessionBrowserPage
 from pages.landing_page_v2 import LandingPage
 from pages.dubbing_studio_page_v2 import DubbingStudioPage
 from pages.youtube_clipper_page import YouTubeClipperPage
+from pages.clip_dub_page import ClipDubPage
 
 # Fix for PyInstaller windowed mode (console=False)
 # When built with console=False, sys.stdout and sys.stderr are None
@@ -118,6 +119,7 @@ class YTShortClipperApp(ctk.CTk):
         self.create_landing_page()
         self.create_home_page()
         self.create_dubbing_studio_page()
+        self.create_clip_dub_page()
         self.create_processing_page()
         self.create_clipping_page()
         self.create_highlight_selection_page()
@@ -185,6 +187,10 @@ class YTShortClipperApp(ctk.CTk):
         # Refresh dubbing studio scroll when navigated to
         if name == "dubbing_studio":
             self.pages["dubbing_studio"].refresh_ui()
+        
+        # Refresh clip+dub page when navigated to
+        if name == "clip_dub":
+            self.pages["clip_dub"].refresh_ui()
     
     def reset_home_page(self):
         """Reset home page to initial state"""
@@ -487,6 +493,14 @@ class YTShortClipperApp(ctk.CTk):
     def create_dubbing_studio_page(self):
         """Create AI Dubbing Studio page"""
         self.pages["dubbing_studio"] = DubbingStudioPage(
+            self.container,
+            self,
+            self.config
+        )
+    
+    def create_clip_dub_page(self):
+        """Create Clip+Dub Studio page"""
+        self.pages["clip_dub"] = ClipDubPage(
             self.container,
             self,
             self.config
