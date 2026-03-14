@@ -1,5 +1,5 @@
 """
-YT Short Clipper Desktop App
+CONTEN CREATOR AGENT Desktop App
 """
 
 import customtkinter as ctk
@@ -20,7 +20,13 @@ from PIL import Image, ImageTk
 from version import __version__, UPDATE_CHECK_URL
 
 # Import utilities
-from utils.helpers import get_app_dir, get_bundle_dir, get_ffmpeg_path, get_ytdlp_path, extract_video_id
+from utils.helpers import (
+    get_app_dir,
+    get_bundle_dir,
+    get_ffmpeg_path,
+    get_ytdlp_path,
+    extract_video_id,
+)
 from utils.logger import debug_log, setup_error_logging, log_error, get_error_log_path
 from config.config_manager import ConfigManager
 from dialogs.model_selector import SearchableModelDropdown
@@ -35,19 +41,26 @@ from pages.clipping_page import ClippingPage
 from pages.contact_page import ContactPage
 from pages.highlight_selection_page import HighlightSelectionPage
 from pages.session_browser_page import SessionBrowserPage
+
 # New V2 pages with redesigned UI
 from pages.landing_page_v2 import LandingPage
 from pages.dubbing_studio_page_v2 import DubbingStudioPage
 from pages.youtube_clipper_page import YouTubeClipperPage
 from pages.clip_dub_page import ClipDubPage
+from components.ui_theme import (
+    apply_theme_mode,
+    enable_auto_tooltips_for_ctk,
+    refresh_theme_for_widget,
+    Colors,
+)
 
 # Fix for PyInstaller windowed mode (console=False)
 # When built with console=False, sys.stdout and sys.stderr are None
 # This causes 'NoneType' object has no attribute 'flush' errors
 if sys.stdout is None:
-    sys.stdout = open(os.devnull, 'w')
+    sys.stdout = open(os.devnull, "w")
 if sys.stderr is None:
-    sys.stderr = open(os.devnull, 'w')
+    sys.stderr = open(os.devnull, "w")
 
 APP_DIR = get_app_dir()
 BUNDLE_DIR = get_bundle_dir()
@@ -66,55 +79,71 @@ COOKIES_FILE = APP_DIR / "cookies.txt"  # NEW: Cookies file path
 class YTShortClipperApp(ctk.CTk):
     def __init__(self):
         super().__init__()
-        
+
         self.config = ConfigManager(CONFIG_FILE, OUTPUT_DIR)
         self.client = None
         self.current_thumbnail = None
         self.processing = False
         self.cancelled = False
-        self.token_usage = {"gpt_input": 0, "gpt_output": 0, "whisper_seconds": 0, "tts_chars": 0}
+        self.token_usage = {
+            "gpt_input": 0,
+            "gpt_output": 0,
+            "whisper_seconds": 0,
+            "tts_chars": 0,
+        }
         self.youtube_connected = False
         self.youtube_channel = None
-        self.ytdlp_path = get_ytdlp_path()  # NEW: Store yt-dlp path for subtitle fetching
+        self.ytdlp_path = (
+            get_ytdlp_path()
+        )  # NEW: Store yt-dlp path for subtitle fetching
         self.cookies_path = COOKIES_FILE  # NEW: Store cookies path
-        
+
         # Session data for highlight selection flow
         self.session_data = None  # Will store result from find_highlights_only
-        
-        self.title("YT Short Clipper")
+
+        self.title("CONTEN CREATOR AGENT")
         self.geometry("900x700")
         self.minsize(800, 600)
         self.resizable(True, True)
-        
-        ctk.set_appearance_mode("dark")
+
+        self.theme_mode = str(self.config.get("theme_mode", "light"))
+        ctk.set_appearance_mode(self.theme_mode)
         ctk.set_default_color_theme("blue")
-        
+        apply_theme_mode(self.theme_mode)
+        enable_auto_tooltips_for_ctk()
+
         # Set app icon after window is created
         self.after(200, self.set_app_icon)
-        
-        self.container = ctk.CTkFrame(self)
+
+        # Set root window and container to match theme bg
+        self.configure(fg_color=Colors.BG_PRIMARY)
+        self.container = ctk.CTkFrame(self, fg_color=Colors.BG_PRIMARY)
         self.container.pack(fill="both", expand=True)
-        
+
         # Initialize shared state variables (used by home/clipper page)
         self.url_var = ctk.StringVar()
         self.subtitle_var = ctk.StringVar(value="id - Indonesian")
         self.clips_var = ctk.StringVar(value="5")
         self.subtitle_loaded = False
-        
+
         # Load icons for buttons (used by multiple pages)
         try:
             play_img = Image.open(ASSETS_DIR / "play.png")
             play_img.thumbnail((20, 20), Image.Resampling.LANCZOS)
-            self.play_icon = ctk.CTkImage(light_image=play_img, dark_image=play_img, size=(20, 20))
-            
+            self.play_icon = ctk.CTkImage(
+                light_image=play_img, dark_image=play_img, size=(20, 20)
+            )
+
             refresh_img = Image.open(ASSETS_DIR / "refresh.png")
             refresh_img.thumbnail((20, 20), Image.Resampling.LANCZOS)
-            self.refresh_icon = ctk.CTkImage(light_image=refresh_img, dark_image=refresh_img, size=(20, 20))
+            self.refresh_icon = ctk.CTkImage(
+                light_image=refresh_img, dark_image=refresh_img, size=(20, 20)
+            )
         except Exception as e:
             debug_log(f"Icon load error: {e}")
             self.play_icon = None
             self.refresh_icon = None
-        
+
         self.pages = {}
         self.create_landing_page()
         self.create_home_page()
@@ -130,17 +159,17 @@ class YTShortClipperApp(ctk.CTk):
         self.create_api_status_page()
         self.create_lib_status_page()
         self.create_contact_page()
-        
+
         self.show_page("landing")
         self.load_config()
         self.check_youtube_status()
-        
+
         # Update start button state based on cookies
         self.update_start_button_state()
-        
+
         # Auto update check disabled - use manual check from Settings > About if needed
         # threading.Thread(target=self.check_update_silent, daemon=True).start()
-    
+
     def set_app_icon(self):
         """Set window icon"""
         try:
@@ -152,7 +181,11 @@ class YTShortClipperApp(ctk.CTk):
                     # Convert PNG to ICO if needed
                     img = Image.open(ICON_PATH)
                     ico_path = ASSETS_DIR / "icon.ico"
-                    img.save(str(ico_path), format='ICO', sizes=[(16, 16), (32, 32), (48, 48), (256, 256)])
+                    img.save(
+                        str(ico_path),
+                        format="ICO",
+                        sizes=[(16, 16), (32, 32), (48, 48), (256, 256)],
+                    )
                     self.iconbitmap(str(ico_path))
             else:
                 if ICON_PATH.exists():
@@ -162,87 +195,153 @@ class YTShortClipperApp(ctk.CTk):
                     self._icon_photo = photo
         except Exception as e:
             print(f"Icon error: {e}")
-    
+
     def show_page(self, name):
         for page in self.pages.values():
             page.pack_forget()
         self.pages[name].pack(fill="both", expand=True)
-        
+
         # Refresh browse list when showing browse page
         if name == "browse":
             self.pages["browse"].refresh_list()
-        
+
         # Refresh API status when showing api_status page
         if name == "api_status":
             self.pages["api_status"].refresh_status()
-        
+
         # Refresh lib status when showing lib_status page
         if name == "lib_status":
             self.pages["lib_status"].refresh_status()
-        
+
         # Reset home page state when returning to home
         if name == "home":
             self.reset_home_page()
-        
+
         # Refresh dubbing studio scroll when navigated to
         if name == "dubbing_studio":
             self.pages["dubbing_studio"].refresh_ui()
-        
+
         # Refresh clip+dub page when navigated to
         if name == "clip_dub":
             self.pages["clip_dub"].refresh_ui()
-    
+
+    def toggle_theme_mode(self):
+        """Toggle global appearance mode between light and dark."""
+        self.theme_mode = (
+            "dark" if str(self.theme_mode).lower().startswith("light") else "light"
+        )
+
+        # 1. Update the Colors palette so all new widgets use correct values
+        apply_theme_mode(self.theme_mode)
+        # 2. Tell CustomTkinter to switch its internal appearance mode
+        ctk.set_appearance_mode(self.theme_mode)
+
+        try:
+            self.config.set("theme_mode", self.theme_mode)
+        except Exception:
+            pass
+
+        # Determine which page is currently visible
+        try:
+            current = next(
+                (k for k, v in self.pages.items() if v.winfo_manager()), "landing"
+            )
+        except Exception:
+            current = "landing"
+
+        # 3. Update root window and main container backgrounds
+        try:
+            self.configure(fg_color=Colors.BG_PRIMARY)
+        except Exception:
+            pass
+        try:
+            self.container.configure(fg_color=Colors.BG_PRIMARY)
+        except Exception:
+            pass
+
+        # 4. Rebuild the landing page (it has many custom-colored cards/buttons
+        #    that look best when fully reconstructed).
+        self._rebuild_landing_page()
+
+        # 5. Walk every *other* page's widget tree and re-map old palette
+        #    colours to the new palette.  This preserves all user state
+        #    (URLs, transcripts, processing progress, etc.) while updating
+        #    fg_color / text_color / border_color everywhere.
+        for name, page in self.pages.items():
+            if name == "landing":
+                continue  # already rebuilt above
+            try:
+                # Update the page frame itself
+                page.configure(fg_color=Colors.BG_PRIMARY)
+            except Exception:
+                pass
+            try:
+                refresh_theme_for_widget(page)
+            except Exception:
+                pass
+
+        self.show_page(current)
+
+    def get_theme_mode(self):
+        return str(self.theme_mode)
+
     def reset_home_page(self):
         """Reset home page to initial state"""
         # Clear URL input
         self.url_var.set("")
-        
+
         # Reset thumbnail state
         self.current_thumbnail = None
-        
+
         # Reset subtitle state
         self.subtitle_loaded = False
         self.subtitle_var.set("id - Indonesian")
-        
+
         # Reset clips input to default
         self.clips_var.set("5")
-        
+
         # Reset home page widgets if they exist
         home = self.pages.get("home")
-        if home and hasattr(home, '_reset_preview'):
+        if home and hasattr(home, "_reset_preview"):
             home._reset_preview()
-        if home and hasattr(home, 'subtitle_dropdown'):
-            home.subtitle_dropdown.configure(state="disabled", values=["id - Indonesian"])
+        if home and hasattr(home, "subtitle_dropdown"):
+            home.subtitle_dropdown.configure(
+                state="disabled", values=["id - Indonesian"]
+            )
             home.subtitle_loaded = False
-        
+
     def create_home_page(self):
         """Create the YouTube Clipper home page using the new redesigned UI"""
         page = YouTubeClipperPage(self.container, self, self.config)
         self.pages["home"] = page
-        
+
         # Store reference to home page for compatibility
         self.home_page = page
-    
+
     def create_preview_placeholder(self):
         """Create placeholder content for video preview - legacy method"""
         # Check if old widget exists (backward compat)
-        if not hasattr(self, 'thumb_frame') or self.thumb_frame is None:
+        if not hasattr(self, "thumb_frame") or self.thumb_frame is None:
             return
-        
+
         # Clear existing content
         for widget in self.thumb_frame.winfo_children():
             widget.destroy()
-        
+
         # Preview content container - centered
         preview_container = ctk.CTkFrame(self.thumb_frame, fg_color="transparent")
         preview_container.place(relx=0.5, rely=0.5, anchor="center")
-        
+
         # Placeholder text
-        self.thumb_label = ctk.CTkLabel(preview_container, 
-            text="📺 Video thumbnail will appear here", 
-            font=ctk.CTkFont(size=12), text_color="gray", justify="center")
+        self.thumb_label = ctk.CTkLabel(
+            preview_container,
+            text="📺 Video thumbnail will appear here",
+            font=ctk.CTkFont(size=12),
+            text_color="gray",
+            justify="center",
+        )
         self.thumb_label.pack()
-    
+
     def paste_url(self):
         """Paste URL from clipboard"""
         # Check if cookies exist first
@@ -250,7 +349,7 @@ class YTShortClipperApp(ctk.CTk):
             # Show custom dialog with buttons
             self.show_cookies_required_dialog()
             return
-        
+
         try:
             # Get clipboard content
             clipboard_text = self.clipboard_get()
@@ -260,11 +359,11 @@ class YTShortClipperApp(ctk.CTk):
             debug_log(f"Paste error: {e}")
             # If clipboard is empty or error, do nothing
             pass
-    
+
     def show_cookies_required_dialog(self):
         """Show custom dialog for cookies requirement with clickable buttons"""
         import webbrowser
-        
+
         # Create dialog window
         dialog = ctk.CTkToplevel(self)
         dialog.title("YouTube Cookies Required")
@@ -272,115 +371,140 @@ class YTShortClipperApp(ctk.CTk):
         dialog.resizable(False, False)
         dialog.transient(self)
         dialog.grab_set()
-        
+
         # Center dialog on parent window
         dialog.update_idletasks()
         x = self.winfo_x() + (self.winfo_width() // 2) - (dialog.winfo_width() // 2)
         y = self.winfo_y() + (self.winfo_height() // 2) - (dialog.winfo_height() // 2)
         dialog.geometry(f"+{x}+{y}")
-        
+
         # Main content frame
         content_frame = ctk.CTkFrame(dialog, fg_color="transparent")
         content_frame.pack(fill="both", expand=True, padx=20, pady=20)
-        
+
         # Warning message
-        ctk.CTkLabel(content_frame, 
+        ctk.CTkLabel(
+            content_frame,
             text="⚠️ Please upload YouTube cookies first!",
             font=ctk.CTkFont(size=14, weight="bold"),
-            text_color=("#e74c3c", "#e74c3c")).pack(pady=(0, 15))
-        
-        ctk.CTkLabel(content_frame,
+            text_color=("#e74c3c", "#e74c3c"),
+        ).pack(pady=(0, 15))
+
+        ctk.CTkLabel(
+            content_frame,
             text="Click a button below to open the setup guide:",
-            font=ctk.CTkFont(size=12)).pack(pady=(0, 15))
-        
+            font=ctk.CTkFont(size=12),
+        ).pack(pady=(0, 15))
+
         # Buttons frame
         buttons_frame = ctk.CTkFrame(content_frame, fg_color="transparent")
         buttons_frame.pack(pady=(0, 10))
-        
+
         # English guide button
-        english_btn = ctk.CTkButton(buttons_frame,
+        english_btn = ctk.CTkButton(
+            buttons_frame,
             text="📖 English Guide",
             width=140,
             height=35,
             font=ctk.CTkFont(size=12),
             fg_color=("#3B8ED0", "#1F6AA5"),
             hover_color=("#2E7AB8", "#16527D"),
-            command=lambda: [
-                webbrowser.open("https://github.com/jipraks/yt-short-clipper/blob/master/GUIDE.md#3-setup-youtube-cookies"),
-                dialog.destroy()
-            ])
+            command=lambda: [self._open_local_guide("GUIDE.md"), dialog.destroy()],
+        )
         english_btn.pack(side="left", padx=5)
-        
+
         # Indonesian guide button
-        indonesian_btn = ctk.CTkButton(buttons_frame,
+        indonesian_btn = ctk.CTkButton(
+            buttons_frame,
             text="📖 Bahasa Indonesia",
             width=140,
             height=35,
             font=ctk.CTkFont(size=12),
             fg_color=("#3B8ED0", "#1F6AA5"),
             hover_color=("#2E7AB8", "#16527D"),
-            command=lambda: [
-                webbrowser.open("https://github.com/jipraks/yt-short-clipper/blob/master/PANDUAN.md#3-setup-cookies-youtube"),
-                dialog.destroy()
-            ])
+            command=lambda: [self._open_local_guide("PANDUAN.md"), dialog.destroy()],
+        )
         indonesian_btn.pack(side="left", padx=5)
-        
+
         # Close button
-        close_btn = ctk.CTkButton(content_frame,
+        close_btn = ctk.CTkButton(
+            content_frame,
             text="Close",
             width=100,
             height=35,
             font=ctk.CTkFont(size=12),
             fg_color=("#6c757d", "#5a6268"),
             hover_color=("#5a6268", "#4e555b"),
-            command=dialog.destroy)
+            command=dialog.destroy,
+        )
         close_btn.pack(pady=(10, 0))
-    
+
+    def _open_local_guide(self, filename: str):
+        """Open local markdown guide file (fallback to web docs page)."""
+        guide_path = BUNDLE_DIR / filename
+        if guide_path.exists():
+            try:
+                if sys.platform == "win32":
+                    os.startfile(str(guide_path))
+                elif sys.platform == "darwin":
+                    subprocess.run(["open", str(guide_path)])
+                else:
+                    subprocess.run(["xdg-open", str(guide_path)])
+                return
+            except Exception:
+                pass
+        # Fallback docs site (non-source link)
+        import webbrowser
+
+        webbrowser.open("https://ai.ytclip.org")
+
     def upload_cookies(self):
         """Upload cookies.txt file"""
         file_path = filedialog.askopenfilename(
             title="Select cookies.txt file",
-            filetypes=[("Text files", "*.txt"), ("All files", "*.*")]
+            filetypes=[("Text files", "*.txt"), ("All files", "*.*")],
         )
-        
+
         if file_path:
             try:
                 # Copy file to app directory
                 import shutil
+
                 shutil.copy(file_path, self.cookies_path)
                 debug_log(f"Cookies uploaded: {file_path}")
-                
+
                 # Update status
                 self.check_cookies_status()
-                
+
                 # Show success message
                 messagebox.showinfo("Success", "cookies.txt uploaded successfully!")
-                
+
             except Exception as e:
                 debug_log(f"Upload cookies error: {e}")
-                messagebox.showerror("Upload Failed", f"Failed to upload cookies.txt:\n{str(e)}")
-    
+                messagebox.showerror(
+                    "Upload Failed", f"Failed to upload cookies.txt:\n{str(e)}"
+                )
+
     def check_cookies_status(self):
         """Check if cookies.txt exists and update UI"""
         if self.cookies_path.exists():
-            if hasattr(self, 'cookies_status_label') and self.cookies_status_label:
+            if hasattr(self, "cookies_status_label") and self.cookies_status_label:
                 self.cookies_status_label.configure(
                     text="✅ cookies.txt loaded",
-                    text_color=("#27ae60", "#2ecc71")  # Green
+                    text_color=("#27ae60", "#2ecc71"),  # Green
                 )
             # Update start button state when cookies status changes
             self.update_start_button_state()
             return True
         else:
-            if hasattr(self, 'cookies_status_label') and self.cookies_status_label:
+            if hasattr(self, "cookies_status_label") and self.cookies_status_label:
                 self.cookies_status_label.configure(
-                    text="🍪 No cookies.txt found",
-                    text_color="gray"
+                    text="🍪 No cookies.txt found", text_color="gray"
                 )
             # Update start button state when cookies status changes
             self.update_start_button_state()
             return False
-    
+
     def create_processing_page(self):
         """Create processing page as embedded frame"""
         self.pages["processing"] = ProcessingPage(
@@ -388,11 +512,11 @@ class YTShortClipperApp(ctk.CTk):
             self.cancel_processing,
             lambda: self.show_page("home"),
             self.open_output,
-            self.show_browse_after_complete
+            self.show_browse_after_complete,
         )
         # Keep reference to steps for update_progress
         self.steps = self.pages["processing"].steps
-    
+
     def create_clipping_page(self):
         """Create clipping page as embedded frame"""
         self.pages["clipping"] = ClippingPage(
@@ -400,17 +524,17 @@ class YTShortClipperApp(ctk.CTk):
             self.cancel_processing,
             lambda: self.show_page("home"),
             self.open_output,
-            lambda: self.show_page("session_browser")
+            lambda: self.show_page("session_browser"),
         )
-    
+
     def create_highlight_selection_page(self):
         """Create highlight selection page as embedded frame"""
         self.pages["highlight_selection"] = HighlightSelectionPage(
             self.container,
             lambda: self.show_page("home"),  # Back to home
-            self.process_selected_highlights  # Process callback
+            self.process_selected_highlights,  # Process callback
         )
-    
+
     def create_session_browser_page(self):
         """Create session browser page as embedded frame"""
         self.pages["session_browser"] = SessionBrowserPage(
@@ -418,9 +542,9 @@ class YTShortClipperApp(ctk.CTk):
             self.config,
             lambda: self.show_page("home"),  # Back to home
             self.resume_session,  # Resume callback
-            self  # Pass app reference
+            self,  # Pass app reference
         )
-    
+
     def create_results_page(self):
         """Create results page as embedded frame"""
         self.pages["results"] = ResultsPage(
@@ -430,20 +554,20 @@ class YTShortClipperApp(ctk.CTk):
             lambda: self.show_page("processing"),
             lambda: self.show_page("home"),
             self.open_output,
-            self.get_youtube_client
+            self.get_youtube_client,
         )
-    
+
     def create_settings_page(self):
         """Create settings page as embedded frame"""
         self.pages["settings"] = SettingsPage(
-            self.container, 
-            self.config, 
+            self.container,
+            self.config,
             self.on_settings_saved,
             lambda: self.show_page("home"),
             OUTPUT_DIR,
-            self.check_update_manual
+            self.check_update_manual,
         )
-    
+
     def create_api_status_page(self):
         """Create API status page as embedded frame"""
         self.pages["api_status"] = APIStatusPage(
@@ -452,17 +576,15 @@ class YTShortClipperApp(ctk.CTk):
             lambda: self.config,
             lambda: (self.youtube_connected, self.youtube_channel),
             lambda: self.show_page("home"),
-            self.refresh_icon
+            self.refresh_icon,
         )
-    
+
     def create_lib_status_page(self):
         """Create library status page as embedded frame"""
         self.pages["lib_status"] = LibStatusPage(
-            self.container,
-            lambda: self.show_page("home"),
-            self.refresh_icon
+            self.container, lambda: self.show_page("home"), self.refresh_icon
         )
-    
+
     def create_browse_page(self):
         """Create browse page as embedded frame"""
         self.pages["browse"] = BrowsePage(
@@ -471,41 +593,42 @@ class YTShortClipperApp(ctk.CTk):
             self.client,
             lambda: self.show_page("home"),
             self.refresh_icon,
-            self.get_youtube_client
+            self.get_youtube_client,
         )
-    
+
     def create_contact_page(self):
         """Create contact page as embedded frame"""
         self.pages["contact"] = ContactPage(
             self.container,
             lambda: self.config.get("installation_id", "unknown"),
-            lambda: self.show_page("home")
+            lambda: self.show_page("home"),
         )
-    
+
     def create_landing_page(self):
         """Create landing page with mode selection cards"""
-        self.pages["landing"] = LandingPage(
-            self.container,
-            self,
-            self.config
-        )
-    
+        self.pages["landing"] = LandingPage(self.container, self, self.config)
+
+    def _rebuild_landing_page(self):
+        """Destroy and recreate the landing page so it picks up new theme colors."""
+        old = self.pages.get("landing")
+        if old:
+            try:
+                old.pack_forget()
+                old.destroy()
+            except Exception:
+                pass
+        self.create_landing_page()
+
     def create_dubbing_studio_page(self):
         """Create AI Dubbing Studio page"""
         self.pages["dubbing_studio"] = DubbingStudioPage(
-            self.container,
-            self,
-            self.config
+            self.container, self, self.config
         )
-    
+
     def create_clip_dub_page(self):
         """Create Clip+Dub Studio page"""
-        self.pages["clip_dub"] = ClipDubPage(
-            self.container,
-            self,
-            self.config
-        )
-    
+        self.pages["clip_dub"] = ClipDubPage(self.container, self, self.config)
+
     def load_config(self):
         # Try new AI providers system first (with .env support)
         ai_providers = self.config.get_resolved_ai_providers()
@@ -513,72 +636,75 @@ class YTShortClipperApp(ctk.CTk):
         api_key = hf_config.get("api_key", "")
         base_url = hf_config.get("base_url", "https://api.openai.com/v1")
         model = hf_config.get("model", "")
-        
+
         # Fallback to legacy root-level config
         if not api_key:
             api_key = self.config.get("api_key", "")
             base_url = self.config.get("base_url", "https://api.openai.com/v1")
             model = self.config.get("model", "")
-        
+
         if api_key:
             try:
                 self.client = OpenAI(api_key=api_key, base_url=base_url)
                 # Only update UI if widgets exist
-                if hasattr(self, 'api_dot'):
+                if hasattr(self, "api_dot"):
                     self.api_dot.configure(text_color="#27ae60")  # Green
-                    self.api_status_label.configure(text=model[:15] if model else "Connected")
+                    self.api_status_label.configure(
+                        text=model[:15] if model else "Connected"
+                    )
             except:
-                if hasattr(self, 'api_dot'):
+                if hasattr(self, "api_dot"):
                     self.api_dot.configure(text_color="#e74c3c")  # Red
                     self.api_status_label.configure(text="Invalid key")
         else:
-            if hasattr(self, 'api_dot'):
+            if hasattr(self, "api_dot"):
                 self.api_dot.configure(text_color="#e74c3c")  # Red
                 self.api_status_label.configure(text="Not configured")
-    
+
     def check_youtube_status(self):
         """Check YouTube connection status"""
         try:
             from youtube_uploader import YouTubeUploader
+
             uploader = YouTubeUploader()
-            
+
             if uploader.is_authenticated():
                 channel = uploader.get_channel_info()
                 if channel:
                     self.youtube_connected = True
                     self.youtube_channel = channel
-                    
+
                     # Only update UI if widgets exist
-                    if hasattr(self, 'yt_dot'):
+                    if hasattr(self, "yt_dot"):
                         self.yt_dot.configure(text_color="#27ae60")  # Green
-                        
+
                         # Show channel name
-                        channel_name = channel['title']
+                        channel_name = channel["title"]
                         self.yt_status_label_home.configure(text=f"{channel_name[:20]}")
                     return
-            
+
             self.youtube_connected = False
-            if hasattr(self, 'yt_dot'):
+            if hasattr(self, "yt_dot"):
                 self.yt_dot.configure(text_color="#e74c3c")  # Red
                 self.yt_status_label_home.configure(text="Not connected")
         except:
             self.youtube_connected = False
-            if hasattr(self, 'yt_dot'):
+            if hasattr(self, "yt_dot"):
                 self.yt_dot.configure(text_color="#e74c3c")  # Red
                 self.yt_status_label_home.configure(text="Not available")
-    
+
     def update_connection_status(self):
         """Update connection status cards (called after settings change)"""
         self.load_config()
         self.check_youtube_status()
-    
+
     def on_settings_saved(self, updated_config):
         """Handle settings saved - accepts config dict"""
         # Update internal config
         if isinstance(updated_config, dict):
             self.config.config.update(updated_config)
             self.config.save()
-            
+
             # Update OpenAI client if highlight_finder config changed
             # Use resolved providers to get API keys from .env
             ai_providers = self.config.get_resolved_ai_providers()
@@ -586,24 +712,24 @@ class YTShortClipperApp(ctk.CTk):
             if hf_config.get("api_key"):
                 self.client = OpenAI(
                     api_key=hf_config.get("api_key"),
-                    base_url=hf_config.get("base_url", "https://api.openai.com/v1")
+                    base_url=hf_config.get("base_url", "https://api.openai.com/v1"),
                 )
-    
+
     def get_youtube_client(self):
         """Get OpenAI client for YouTube title generation"""
         # Use resolved providers to get API keys from .env
         ai_providers = self.config.get_resolved_ai_providers()
         yt_config = ai_providers.get("youtube_title_maker", {})
-        
+
         if yt_config.get("api_key"):
             return OpenAI(
                 api_key=yt_config.get("api_key"),
-                base_url=yt_config.get("base_url", "https://api.openai.com/v1")
+                base_url=yt_config.get("base_url", "https://api.openai.com/v1"),
             )
         else:
             # Fallback to main client for backward compatibility
             return self.client
-    
+
     def on_url_change(self, *args):
         """Handle URL input change - legacy method for old home page"""
         url = self.url_var.get().strip()
@@ -619,67 +745,78 @@ class YTShortClipperApp(ctk.CTk):
             # Recreate placeholder
             self.create_preview_placeholder()
             # Reset subtitle dropdown to disabled state (legacy widgets)
-            if hasattr(self, 'subtitle_loading') and self.subtitle_loading:
+            if hasattr(self, "subtitle_loading") and self.subtitle_loading:
                 self.subtitle_loading.pack_forget()
-            if hasattr(self, 'subtitle_dropdown') and self.subtitle_dropdown:
-                self.subtitle_dropdown.configure(state="disabled", values=["id - Indonesian"])
+            if hasattr(self, "subtitle_dropdown") and self.subtitle_dropdown:
+                self.subtitle_dropdown.configure(
+                    state="disabled", values=["id - Indonesian"]
+                )
             self.subtitle_var.set("id - Indonesian")
             # Disable start button when URL is invalid or cookies missing
             self.update_start_button_state()
-    
+
     def update_start_button_state(self):
         """Update start button state based on URL, cookies, and library validation"""
         # Skip if using new home page (it handles its own state)
-        if not hasattr(self, 'start_btn') or self.start_btn is None:
+        if not hasattr(self, "start_btn") or self.start_btn is None:
             return
-            
+
         has_cookies = self.cookies_path.exists()
-        libs_ok = getattr(self, 'libs_installed', True)  # Default True if not checked yet
-        
+        libs_ok = getattr(
+            self, "libs_installed", True
+        )  # Default True if not checked yet
+
         # Always keep paste button enabled (so user can see alert)
-        if hasattr(self, 'paste_btn') and self.paste_btn:
+        if hasattr(self, "paste_btn") and self.paste_btn:
             self.paste_btn.configure(state="normal")
-        
+
         # If no cookies, disable URL entry and start button
         if not has_cookies:
-            if hasattr(self, 'url_entry') and self.url_entry:
+            if hasattr(self, "url_entry") and self.url_entry:
                 self.url_entry.configure(state="disabled")
-            self.start_btn.configure(state="disabled", fg_color="gray", hover_color="gray")
+            self.start_btn.configure(
+                state="disabled", fg_color="gray", hover_color="gray"
+            )
             return
-        
+
         # Cookies exist - enable URL input
-        if hasattr(self, 'url_entry') and self.url_entry:
+        if hasattr(self, "url_entry") and self.url_entry:
             self.url_entry.configure(state="normal")
-        
+
         # Check if URL is valid, subtitle is loaded, and libs are installed
         url = self.url_var.get().strip()
         video_id = extract_video_id(url)
-        
+
         if video_id and self.subtitle_loaded and libs_ok:
-            self.start_btn.configure(state="normal", fg_color=("#1f538d", "#14375e"), 
-                                    hover_color=("#144870", "#0d2a47"))
+            self.start_btn.configure(
+                state="normal",
+                fg_color=("#1f538d", "#14375e"),
+                hover_color=("#144870", "#0d2a47"),
+            )
         else:
-            self.start_btn.configure(state="disabled", fg_color="gray", hover_color="gray")
-    
+            self.start_btn.configure(
+                state="disabled", fg_color="gray", hover_color="gray"
+            )
+
     def check_lib_status(self):
         """Check library installation status and update UI"""
         from utils.dependency_manager import check_dependency
         from utils.helpers import get_app_dir, is_ytdlp_module_available
-        
+
         app_dir = get_app_dir()
-        
+
         # Check each dependency
-        ffmpeg_ok = check_dependency('ffmpeg', app_dir)
-        deno_ok = check_dependency('deno', app_dir)
+        ffmpeg_ok = check_dependency("ffmpeg", app_dir)
+        deno_ok = check_dependency("deno", app_dir)
         ytdlp_ok = is_ytdlp_module_available()
-        
+
         all_ok = ffmpeg_ok and deno_ok and ytdlp_ok
         self.libs_installed = all_ok
-        
+
         # Skip UI update if old widgets don't exist
-        if not hasattr(self, 'lib_status_frame') or self.lib_status_frame is None:
+        if not hasattr(self, "lib_status_frame") or self.lib_status_frame is None:
             return
-        
+
         if all_ok:
             # All installed - hide lib status
             self.lib_status_frame.pack_forget()
@@ -687,183 +824,210 @@ class YTShortClipperApp(ctk.CTk):
             # Clear existing widgets
             for widget in self.lib_status_frame.winfo_children():
                 widget.destroy()
-            
+
             # Create status row with colored indicators
             status_row = ctk.CTkFrame(self.lib_status_frame, fg_color="transparent")
             status_row.pack()
-            
-            ctk.CTkLabel(status_row, text="Lib Status:", font=ctk.CTkFont(size=10), 
-                text_color="gray").pack(side="left", padx=(0, 5))
-            
+
+            ctk.CTkLabel(
+                status_row,
+                text="Lib Status:",
+                font=ctk.CTkFont(size=10),
+                text_color="gray",
+            ).pack(side="left", padx=(0, 5))
+
             # Deno
             deno_color = "#4ade80" if deno_ok else "#f87171"
-            ctk.CTkLabel(status_row, text=f"Deno {'✓' if deno_ok else '✗'}", 
-                font=ctk.CTkFont(size=10), text_color=deno_color).pack(side="left", padx=(0, 8))
-            
+            ctk.CTkLabel(
+                status_row,
+                text=f"Deno {'✓' if deno_ok else '✗'}",
+                font=ctk.CTkFont(size=10),
+                text_color=deno_color,
+            ).pack(side="left", padx=(0, 8))
+
             # YT-DLP
             ytdlp_color = "#4ade80" if ytdlp_ok else "#f87171"
-            ctk.CTkLabel(status_row, text=f"YT-DLP {'✓' if ytdlp_ok else '✗'}", 
-                font=ctk.CTkFont(size=10), text_color=ytdlp_color).pack(side="left", padx=(0, 8))
-            
+            ctk.CTkLabel(
+                status_row,
+                text=f"YT-DLP {'✓' if ytdlp_ok else '✗'}",
+                font=ctk.CTkFont(size=10),
+                text_color=ytdlp_color,
+            ).pack(side="left", padx=(0, 8))
+
             # FFmpeg
             ffmpeg_color = "#4ade80" if ffmpeg_ok else "#f87171"
-            ctk.CTkLabel(status_row, text=f"FFmpeg {'✓' if ffmpeg_ok else '✗'}", 
-                font=ctk.CTkFont(size=10), text_color=ffmpeg_color).pack(side="left", padx=(0, 8))
-            
+            ctk.CTkLabel(
+                status_row,
+                text=f"FFmpeg {'✓' if ffmpeg_ok else '✗'}",
+                font=ctk.CTkFont(size=10),
+                text_color=ffmpeg_color,
+            ).pack(side="left", padx=(0, 8))
+
             # Install link
-            install_link = ctk.CTkLabel(status_row, text="(Install required libraries)", 
-                font=ctk.CTkFont(size=10), text_color="#f87171", cursor="hand2")
+            install_link = ctk.CTkLabel(
+                status_row,
+                text="(Install required libraries)",
+                font=ctk.CTkFont(size=10),
+                text_color="#f87171",
+                cursor="hand2",
+            )
             install_link.pack(side="left")
             install_link.bind("<Button-1>", lambda e: self.show_page("lib_status"))
-            
+
             self.lib_status_frame.pack(fill="x", padx=20, pady=(5, 0))
-        
+
         # Update start button state
         self.update_start_button_state()
-    
+
     def load_subtitles(self, url: str):
         """Fetch available subtitles for the video"""
+
         def fetch():
             try:
                 # Show loading state
                 self.after(0, lambda: self.show_subtitle_loading())
-                
+
                 # Import here to avoid circular dependency
                 from clipper_core import AutoClipperCore
-                
+
                 # Get available subtitles (pass cookies_path)
                 debug_log(f"Fetching subtitles for: {url}")
                 debug_log(f"Cookies path: {self.cookies_path}")
                 debug_log(f"Cookies exists: {self.cookies_path.exists()}")
-                
-                cookies_str = str(self.cookies_path) if self.cookies_path.exists() else None
+
+                cookies_str = (
+                    str(self.cookies_path) if self.cookies_path.exists() else None
+                )
                 debug_log(f"Passing cookies_path: {cookies_str}")
-                
+
                 result = AutoClipperCore.get_available_subtitles(
-                    url, 
-                    self.ytdlp_path, 
-                    cookies_path=cookies_str
+                    url, self.ytdlp_path, cookies_path=cookies_str
                 )
                 debug_log(f"Subtitle fetch result: {result}")
-                
+
                 if result.get("error"):
                     debug_log(f"Subtitle error: {result['error']}")
                     self.after(0, lambda: self.on_subtitle_error(result["error"]))
                     return
-                
+
                 # Combine manual and auto-generated subtitles
                 all_subs = []
-                
+
                 # Prioritize manual subtitles
                 for sub in result.get("subtitles", []):
-                    all_subs.append({
-                        "code": sub["code"],
-                        "name": sub["name"],
-                        "type": "manual"
-                    })
-                
+                    all_subs.append(
+                        {"code": sub["code"], "name": sub["name"], "type": "manual"}
+                    )
+
                 # Add auto-generated subtitles
                 for sub in result.get("automatic_captions", []):
-                    all_subs.append({
-                        "code": sub["code"],
-                        "name": f"{sub['name']} (auto)",
-                        "type": "auto"
-                    })
-                
+                    all_subs.append(
+                        {
+                            "code": sub["code"],
+                            "name": f"{sub['name']} (auto)",
+                            "type": "auto",
+                        }
+                    )
+
                 debug_log(f"Total subtitles found: {len(all_subs)}")
-                
+
                 if not all_subs:
-                    self.after(0, lambda: self.on_subtitle_error("No subtitles available"))
+                    self.after(
+                        0, lambda: self.on_subtitle_error("No subtitles available")
+                    )
                     return
-                
+
                 self.after(0, lambda: self.show_subtitle_selector(all_subs))
-                
+
             except Exception as e:
                 debug_log(f"Exception in load_subtitles: {str(e)}")
                 import traceback
+
                 debug_log(traceback.format_exc())
                 self.after(0, lambda: self.on_subtitle_error(str(e)))
-        
+
         threading.Thread(target=fetch, daemon=True).start()
-    
+
     def show_subtitle_loading(self):
         """Show loading state for subtitle selector - legacy method"""
         # Skip if old widgets don't exist
-        if not hasattr(self, 'subtitle_dropdown') or self.subtitle_dropdown is None:
+        if not hasattr(self, "subtitle_dropdown") or self.subtitle_dropdown is None:
             return
         # Keep dropdown visible but show loading indicator
         self.subtitle_dropdown.configure(state="disabled")
-        if hasattr(self, 'subtitle_loading') and self.subtitle_loading:
+        if hasattr(self, "subtitle_loading") and self.subtitle_loading:
             self.subtitle_loading.pack(fill="x", padx=(4, 8), pady=(4, 0))
-    
+
     def on_subtitle_error(self, error: str):
         """Handle subtitle fetch error"""
         debug_log(f"Subtitle fetch error: {error}")
         self.subtitle_loaded = False
         # Hide loading, keep dropdown disabled (legacy widgets)
-        if hasattr(self, 'subtitle_loading') and self.subtitle_loading:
+        if hasattr(self, "subtitle_loading") and self.subtitle_loading:
             self.subtitle_loading.pack_forget()
-        if hasattr(self, 'subtitle_dropdown') and self.subtitle_dropdown:
+        if hasattr(self, "subtitle_dropdown") and self.subtitle_dropdown:
             self.subtitle_dropdown.configure(state="disabled")
         # Show error to user
         messagebox.showerror("Subtitle Error", f"Failed to fetch subtitles:\n\n{error}")
         # Update button state
         self.update_start_button_state()
-    
+
     def show_subtitle_selector(self, subtitles: list):
         """Show subtitle selector with available options"""
         # Hide loading (legacy)
-        if hasattr(self, 'subtitle_loading') and self.subtitle_loading:
+        if hasattr(self, "subtitle_loading") and self.subtitle_loading:
             self.subtitle_loading.pack_forget()
-        
+
         # Create dropdown options
         options = [f"{sub['code']} - {sub['name']}" for sub in subtitles]
-        
+
         # Set default to Indonesian if available, otherwise first option
         default_value = options[0]
         for opt in options:
             if opt.startswith("id "):
                 default_value = opt
                 break
-        
+
         self.subtitle_var.set(default_value)
-        if hasattr(self, 'subtitle_dropdown') and self.subtitle_dropdown:
+        if hasattr(self, "subtitle_dropdown") and self.subtitle_dropdown:
             self.subtitle_dropdown.configure(values=options, state="normal")
-        
+
         # Mark subtitles as loaded
         self.subtitle_loaded = True
-        
+
         # Update start button state (subtitles loaded successfully)
         self.update_start_button_state()
-    
+
     def load_thumbnail(self, video_id: str):
         # Skip if old widgets don't exist
-        if not hasattr(self, 'thumb_frame') or self.thumb_frame is None:
+        if not hasattr(self, "thumb_frame") or self.thumb_frame is None:
             return
-            
+
         def fetch():
             try:
                 import ssl
                 import certifi
-                
+
                 # Try with certifi first, fallback to unverified SSL
                 ssl_context = None
                 try:
                     ssl_context = ssl.create_default_context(cafile=certifi.where())
                 except Exception:
                     pass
-                
+
                 if ssl_context is None:
                     # Fallback to unverified SSL (for PyInstaller builds)
                     ssl_context = ssl.create_default_context()
                     ssl_context.check_hostname = False
                     ssl_context.verify_mode = ssl.CERT_NONE
-                
+
                 img = None
                 for quality in ["maxresdefault", "hqdefault", "mqdefault"]:
                     try:
                         url = f"https://img.youtube.com/vi/{video_id}/{quality}.jpg"
-                        with urllib.request.urlopen(url, timeout=5, context=ssl_context) as r:
+                        with urllib.request.urlopen(
+                            url, timeout=5, context=ssl_context
+                        ) as r:
                             data = r.read()
                         img = Image.open(io.BytesIO(data))
                         if img.size[0] > 120:
@@ -871,10 +1035,10 @@ class YTShortClipperApp(ctk.CTk):
                     except Exception as e:
                         debug_log(f"Thumbnail fetch error ({quality}): {e}")
                         continue
-                
+
                 if img is None:
                     raise Exception("All thumbnail qualities failed")
-                    
+
                 # Resize to fit preview area in landscape (16:9 aspect ratio)
                 # Frame is 400x225
                 img.thumbnail((390, 220), Image.Resampling.LANCZOS)
@@ -882,67 +1046,79 @@ class YTShortClipperApp(ctk.CTk):
             except Exception as e:
                 debug_log(f"Thumbnail load failed: {e}")
                 self.after(0, lambda: self.on_thumbnail_error())
-        
+
         # Clear image reference properly before loading new one
         self.current_thumbnail = None
-        
+
         # Show loading state (legacy widgets)
-        if hasattr(self, 'thumb_frame') and self.thumb_frame:
+        if hasattr(self, "thumb_frame") and self.thumb_frame:
             for widget in self.thumb_frame.winfo_children():
                 widget.destroy()
-            
+
             loading_container = ctk.CTkFrame(self.thumb_frame, fg_color="transparent")
             loading_container.place(relx=0.5, rely=0.5, anchor="center")
-            
-            self.thumb_label = ctk.CTkLabel(loading_container, text="Loading...", 
-                font=ctk.CTkFont(size=13), text_color="gray")
+
+            self.thumb_label = ctk.CTkLabel(
+                loading_container,
+                text="Loading...",
+                font=ctk.CTkFont(size=13),
+                text_color="gray",
+            )
             self.thumb_label.pack()
-        
-        if hasattr(self, 'start_btn') and self.start_btn:
-            self.start_btn.configure(state="disabled", fg_color="gray", hover_color="gray")
+
+        if hasattr(self, "start_btn") and self.start_btn:
+            self.start_btn.configure(
+                state="disabled", fg_color="gray", hover_color="gray"
+            )
         threading.Thread(target=fetch, daemon=True).start()
-    
+
     def on_thumbnail_error(self):
         # Clear image reference properly before showing error
         self.current_thumbnail = None
-        
+
         # Skip if old widgets don't exist
-        if not hasattr(self, 'thumb_frame') or self.thumb_frame is None:
+        if not hasattr(self, "thumb_frame") or self.thumb_frame is None:
             return
-            
+
         # Recreate placeholder with error message
         for widget in self.thumb_frame.winfo_children():
             widget.destroy()
-        
+
         preview_container = ctk.CTkFrame(self.thumb_frame, fg_color="transparent")
         preview_container.place(relx=0.5, rely=0.5, anchor="center")
-        
-        self.thumb_label = ctk.CTkLabel(preview_container, 
-            text="⚠️ Could not load thumbnail\nPlease check the URL", 
-            font=ctk.CTkFont(size=13), text_color="gray", justify="center")
+
+        self.thumb_label = ctk.CTkLabel(
+            preview_container,
+            text="⚠️ Could not load thumbnail\nPlease check the URL",
+            font=ctk.CTkFont(size=13),
+            text_color="gray",
+            justify="center",
+        )
         self.thumb_label.pack()
-        
-        if hasattr(self, 'start_btn') and self.start_btn:
-            self.start_btn.configure(state="disabled", fg_color="gray", hover_color="gray")
-    
+
+        if hasattr(self, "start_btn") and self.start_btn:
+            self.start_btn.configure(
+                state="disabled", fg_color="gray", hover_color="gray"
+            )
+
     def show_thumbnail(self, img):
         try:
             # Skip if old widgets don't exist
-            if not hasattr(self, 'thumb_frame') or self.thumb_frame is None:
+            if not hasattr(self, "thumb_frame") or self.thumb_frame is None:
                 return
-                
+
             # Clear the preview container and show thumbnail
             for widget in self.thumb_frame.winfo_children():
                 widget.destroy()
-            
+
             # Create image with proper size
             ctk_img = ctk.CTkImage(light_image=img, dark_image=img, size=img.size)
             self.current_thumbnail = ctk_img
-            
+
             # Show thumbnail centered
             self.thumb_label = ctk.CTkLabel(self.thumb_frame, image=ctk_img, text="")
             self.thumb_label.place(relx=0.5, rely=0.5, anchor="center")
-            
+
             # Update start button state (checks both URL and cookies)
             self.update_start_button_state()
         except Exception as e:
@@ -952,81 +1128,102 @@ class YTShortClipperApp(ctk.CTk):
 
     def start_processing(self):
         # Disable button during validation (if legacy widget exists)
-        if hasattr(self, 'start_btn') and self.start_btn:
+        if hasattr(self, "start_btn") and self.start_btn:
             self.start_btn.configure(state="disabled", text="Validating...")
-        
+
         def validate_and_start():
             try:
                 from openai import OpenAI
-                
+
                 # Validate Highlight Finder (required for all processing)
                 # Use resolved providers to get API keys from .env
                 ai_providers = self.config.get_resolved_ai_providers()
                 hf_config = ai_providers.get("highlight_finder", {})
                 hf_api_key = hf_config.get("api_key", "").strip()
-                hf_base_url = hf_config.get("base_url", "https://api.openai.com/v1").strip()
+                hf_base_url = hf_config.get(
+                    "base_url", "https://api.openai.com/v1"
+                ).strip()
                 hf_model = hf_config.get("model", "").strip()
-                
+
                 if not hf_api_key or not hf_model:
-                    self.after(0, lambda: self._on_validation_failed(
-                        "Highlight Finder API is not configured!\n\n" +
-                        "This is required to find viral moments in videos.\n\n" +
-                        "Please configure it in Settings → AI API Settings → Highlight Finder"))
+                    self.after(
+                        0,
+                        lambda: self._on_validation_failed(
+                            "Highlight Finder API is not configured!\n\n"
+                            + "This is required to find viral moments in videos.\n\n"
+                            + "Please configure it in Settings → AI API Settings → Highlight Finder"
+                        ),
+                    )
                     return
-                
+
                 # Test Highlight Finder API
                 try:
                     hf_client = OpenAI(api_key=hf_api_key, base_url=hf_base_url)
-                    
+
                     # Try to list models to verify API key and model availability
                     try:
                         hf_models = hf_client.models.list()
                         hf_available = [m.id for m in hf_models.data]
-                        
+
                         if hf_model not in hf_available:
-                            self.after(0, lambda: self._on_validation_failed(
-                                f"Highlight Finder model '{hf_model}' is not available!\n\n" +
-                                "Please check your configuration in:\n" +
-                                "Settings → AI API Settings → Highlight Finder"))
+                            self.after(
+                                0,
+                                lambda: self._on_validation_failed(
+                                    f"Highlight Finder model '{hf_model}' is not available!\n\n"
+                                    + "Please check your configuration in:\n"
+                                    + "Settings → AI API Settings → Highlight Finder"
+                                ),
+                            )
                             return
                     except Exception as list_error:
                         # If models.list() fails, the API key might still be valid
                         # Some providers don't support models.list()
                         # Just verify the API key is not empty and continue
                         pass
-                    
+
                 except Exception as e:
-                    self.after(0, lambda: self._on_validation_failed(
-                        f"Highlight Finder API validation failed!\n\n" +
-                        f"Error: {str(e)[:100]}\n\n" +
-                        "Please check your configuration in:\n" +
-                        "Settings → AI API Settings → Highlight Finder"))
+                    self.after(
+                        0,
+                        lambda: self._on_validation_failed(
+                            f"Highlight Finder API validation failed!\n\n"
+                            + f"Error: {str(e)[:100]}\n\n"
+                            + "Please check your configuration in:\n"
+                            + "Settings → AI API Settings → Highlight Finder"
+                        ),
+                    )
                     return
-                
+
                 # All validations passed, proceed with processing
                 self.after(0, self._start_processing_validated)
-                
+
             except Exception as e:
-                self.after(0, lambda: self._on_validation_failed(f"Validation error: {str(e)[:100]}"))
-        
+                self.after(
+                    0,
+                    lambda: self._on_validation_failed(
+                        f"Validation error: {str(e)[:100]}"
+                    ),
+                )
+
         threading.Thread(target=validate_and_start, daemon=True).start()
-    
+
     def _on_validation_failed(self, error_msg):
         """Handle validation failure"""
-        if hasattr(self, 'start_btn') and self.start_btn:
+        if hasattr(self, "start_btn") and self.start_btn:
             self.start_btn.configure(state="normal", text="Find Highlights")
         messagebox.showerror("Validation Failed", error_msg)
-    
+
     def _start_processing_validated(self):
         """Start processing after validation passed"""
-        if hasattr(self, 'start_btn') and self.start_btn:
+        if hasattr(self, "start_btn") and self.start_btn:
             self.start_btn.configure(state="normal", text="Find Highlights")
-        
+
         # Legacy validation (backward compatibility)
         if not self.client:
-            messagebox.showerror("Error", "Configure API settings first!\nClick ⚙️ button.")
+            messagebox.showerror(
+                "Error", "Configure API settings first!\nClick ⚙️ button."
+            )
             return
-        
+
         url = self.url_var.get().strip()
         if not extract_video_id(url):
             messagebox.showerror("Error", "Enter a valid YouTube URL!")
@@ -1038,59 +1235,84 @@ class YTShortClipperApp(ctk.CTk):
         except:
             messagebox.showerror("Error", "Clips must be 1-50!")
             return
-        
+
         # Get selected subtitle language (extract code from "id - Indonesian" format)
         subtitle_selection = self.subtitle_var.get()
-        subtitle_lang = subtitle_selection.split(" - ")[0] if " - " in subtitle_selection else "id"
-        
+        subtitle_lang = (
+            subtitle_selection.split(" - ")[0] if " - " in subtitle_selection else "id"
+        )
+
         # Reset UI
         self.processing = True
         self.cancelled = False
-        self.token_usage = {"gpt_input": 0, "gpt_output": 0, "whisper_seconds": 0, "tts_chars": 0}
-        
+        self.token_usage = {
+            "gpt_input": 0,
+            "gpt_output": 0,
+            "whisper_seconds": 0,
+            "tts_chars": 0,
+        }
+
         # Reset processing page UI
         self.pages["processing"].reset_ui()
-        
+
         self.show_page("processing")
-        
+
         output_dir = self.config.get("output_dir", str(OUTPUT_DIR))
         model = self.config.get("model", "gpt-4.1")
-        
+
         # NEW FLOW: Only find highlights (don't process yet)
-        threading.Thread(target=self.run_find_highlights, 
-                        args=(url, num_clips, output_dir, model, subtitle_lang), 
-                        daemon=True).start()
-    
-    def run_processing(self, url, num_clips, output_dir, model, add_captions, add_hook, subtitle_lang="id"):
+        threading.Thread(
+            target=self.run_find_highlights,
+            args=(url, num_clips, output_dir, model, subtitle_lang),
+            daemon=True,
+        ).start()
+
+    def run_processing(
+        self,
+        url,
+        num_clips,
+        output_dir,
+        model,
+        add_captions,
+        add_hook,
+        subtitle_lang="id",
+    ):
         try:
             from clipper_core import AutoClipperCore
-            
+
             # Wrapper for log callback that also logs to console in debug mode
             def log_with_debug(msg):
                 debug_log(msg)
                 self.after(0, lambda: self.update_status(msg))
-            
+
             # Get system prompt from config
             # Priority: ai_providers.highlight_finder.system_message > root system_prompt
             ai_providers = self.config.get("ai_providers", {})
             highlight_finder = ai_providers.get("highlight_finder", {})
-            system_prompt = highlight_finder.get("system_message") or self.config.get("system_prompt", None)
-            
+            system_prompt = highlight_finder.get("system_message") or self.config.get(
+                "system_prompt", None
+            )
+
             temperature = self.config.get("temperature", 1.0)
             tts_model = self.config.get("tts_model", "tts-1")
             watermark_settings = self.config.get("watermark", {"enabled": False})
-            credit_watermark_settings = self.config.get("credit_watermark", {"enabled": False})
-            
+            credit_watermark_settings = self.config.get(
+                "credit_watermark", {"enabled": False}
+            )
+
             # Get face tracking mode from config (set in settings page)
             face_tracking_mode = self.config.get("face_tracking_mode", "opencv")
-            
-            mediapipe_settings = self.config.get("mediapipe_settings", {
-                "lip_activity_threshold": 0.15,
-                "switch_threshold": 0.3,
-                "min_shot_duration": 90,
-                "center_weight": 0.3
-            })
-            
+
+            mediapipe_settings = self.config.get(
+                "mediapipe_settings",
+                {
+                    "lip_activity_threshold": 0.15,
+                    "switch_threshold": 0.3,
+                    "min_shot_duration": 90,
+                    "center_weight": 0.3,
+                },
+            )
+
             core = AutoClipperCore(
                 client=self.client,
                 ffmpeg_path=get_ffmpeg_path(),
@@ -1107,27 +1329,31 @@ class YTShortClipperApp(ctk.CTk):
                 ai_providers=self.config.get_resolved_ai_providers(),
                 subtitle_language=subtitle_lang,
                 log_callback=log_with_debug,
-                progress_callback=lambda s, p: self.after(0, lambda: self.update_progress(s, p)),
-                token_callback=lambda a, b, c, d: self.after(0, lambda: self.update_tokens(a, b, c, d)),
-                cancel_check=lambda: self.cancelled
+                progress_callback=lambda s, p: self.after(
+                    0, lambda: self.update_progress(s, p)
+                ),
+                token_callback=lambda a, b, c, d: self.after(
+                    0, lambda: self.update_tokens(a, b, c, d)
+                ),
+                cancel_check=lambda: self.cancelled,
             )
-            
+
             # Enable GPU acceleration if configured
             gpu_settings = self.config.get("gpu_acceleration", {})
             if gpu_settings.get("enabled", False):
                 core.enable_gpu_acceleration(True)
-            
-            core.use_heatmap = getattr(self, 'use_heatmap', True)
+
+            core.use_heatmap = getattr(self, "use_heatmap", True)
             core.process(url, num_clips, add_captions=add_captions, add_hook=add_hook)
             if not self.cancelled:
                 self.after(0, self.on_complete)
         except Exception as e:
             error_msg = str(e)
             debug_log(f"ERROR: {error_msg}")
-            
+
             # Log error to file with full traceback
             log_error(f"Processing failed for URL: {url}", e)
-            
+
             if self.cancelled or "cancel" in error_msg.lower():
                 self.after(0, self.on_cancelled)
             else:
@@ -1135,29 +1361,31 @@ class YTShortClipperApp(ctk.CTk):
 
     def update_status(self, msg):
         self.pages["processing"].update_status(msg)
-    
+
     def update_progress(self, status, progress):
         print(f"[DEBUG] update_progress called: status='{status}', progress={progress}")
         self.pages["processing"].update_status(status)
-        
+
         # Check if steps UI is available
-        if not hasattr(self, 'steps') or len(self.steps) < 3:
+        if not hasattr(self, "steps") or len(self.steps) < 3:
             return  # Skip step updates if UI not ready
-        
+
         # Update step indicators based on status text
         status_lower = status.lower()
-        
+
         # Parse progress percentage from status if available
         # Try multiple formats: (51%) or 51.2% or 51%
-        progress_match = re.search(r'\((\d+(?:\.\d+)?)%\)|(\d+(?:\.\d+)?)%', status)
+        progress_match = re.search(r"\((\d+(?:\.\d+)?)%\)|(\d+(?:\.\d+)?)%", status)
         if progress_match:
             # Get the first non-None group
-            step_progress = float(progress_match.group(1) or progress_match.group(2)) / 100
+            step_progress = (
+                float(progress_match.group(1) or progress_match.group(2)) / 100
+            )
         else:
             step_progress = None
-        
+
         print(f"[DEBUG] Parsed step_progress: {step_progress}")
-        
+
         if "download" in status_lower:
             if step_progress is None:
                 step_progress = 0.0
@@ -1171,12 +1399,12 @@ class YTShortClipperApp(ctk.CTk):
         elif "clip" in status_lower or "clean" in status_lower:
             self.steps[0].set_done("Downloaded")
             self.steps[1].set_done("Found highlights")
-            
+
             if step_progress is None:
                 step_progress = 0.0
-            
+
             # Extract clip number to show progress
-            match = re.search(r'Clip (\d+)/(\d+)', status)
+            match = re.search(r"Clip (\d+)/(\d+)", status)
             if match:
                 current, total = int(match.group(1)), int(match.group(2))
                 percent = current / total
@@ -1186,36 +1414,40 @@ class YTShortClipperApp(ctk.CTk):
         elif "complete" in status_lower:
             for step in self.steps:
                 step.set_done("Complete")
-    
+
     def update_tokens(self, gpt_in, gpt_out, whisper, tts):
         self.token_usage["gpt_input"] += gpt_in
         self.token_usage["gpt_output"] += gpt_out
         self.token_usage["whisper_seconds"] += whisper
         self.token_usage["tts_chars"] += tts
-        
+
         # Update processing page display
-        gpt_total = self.token_usage['gpt_input'] + self.token_usage['gpt_output']
-        whisper_minutes = self.token_usage['whisper_seconds'] / 60
-        tts_chars = self.token_usage['tts_chars']
+        gpt_total = self.token_usage["gpt_input"] + self.token_usage["gpt_output"]
+        whisper_minutes = self.token_usage["whisper_seconds"] / 60
+        tts_chars = self.token_usage["tts_chars"]
         self.pages["processing"].update_tokens(gpt_total, whisper_minutes, tts_chars)
-    
-    def run_find_highlights(self, url, num_clips, output_dir, model, subtitle_lang="id"):
+
+    def run_find_highlights(
+        self, url, num_clips, output_dir, model, subtitle_lang="id"
+    ):
         """NEW: Phase 1 - Find highlights only (don't process yet)"""
         try:
             from clipper_core import AutoClipperCore
-            
+
             # Wrapper for log callback
             def log_with_debug(msg):
                 debug_log(msg)
                 self.after(0, lambda: self.update_status(msg))
-            
+
             # Get system prompt from config
             ai_providers = self.config.get("ai_providers", {})
             highlight_finder = ai_providers.get("highlight_finder", {})
-            system_prompt = highlight_finder.get("system_message") or self.config.get("system_prompt", None)
-            
+            system_prompt = highlight_finder.get("system_message") or self.config.get(
+                "system_prompt", None
+            )
+
             temperature = self.config.get("temperature", 1.0)
-            
+
             core = AutoClipperCore(
                 client=self.client,
                 ffmpeg_path=get_ffmpeg_path(),
@@ -1227,133 +1459,149 @@ class YTShortClipperApp(ctk.CTk):
                 ai_providers=self.config.get_resolved_ai_providers(),
                 subtitle_language=subtitle_lang,
                 log_callback=log_with_debug,
-                progress_callback=lambda s, p: self.after(0, lambda: self.update_progress(s, p)),
-                token_callback=lambda a, b, c, d: self.after(0, lambda: self.update_tokens(a, b, c, d)),
-                cancel_check=lambda: self.cancelled
+                progress_callback=lambda s, p: self.after(
+                    0, lambda: self.update_progress(s, p)
+                ),
+                token_callback=lambda a, b, c, d: self.after(
+                    0, lambda: self.update_tokens(a, b, c, d)
+                ),
+                cancel_check=lambda: self.cancelled,
             )
-            
+
             # Call find_highlights_only (returns session data)
-            core.use_heatmap = getattr(self, 'use_heatmap', True)
+            core.use_heatmap = getattr(self, "use_heatmap", True)
             result = core.find_highlights_only(url, num_clips)
-            
+
             if not self.cancelled and result:
                 # Store session data for later processing
                 self.session_data = result
-                
+
                 # Navigate to highlight selection page
                 self.after(0, self.show_highlight_selection)
             elif self.cancelled:
                 self.after(0, self.on_cancelled)
-                
+
         except Exception as e:
             error_msg = str(e)
             debug_log(f"ERROR: {error_msg}")
             log_error(f"Find highlights failed for URL: {url}", e)
-            
+
             if self.cancelled or "cancel" in error_msg.lower():
                 self.after(0, self.on_cancelled)
             else:
                 self.after(0, lambda: self.on_error(error_msg))
-    
+
     def show_highlight_selection(self):
         """Show highlight selection page with found highlights"""
         if not self.session_data:
             messagebox.showerror("Error", "No highlight data available")
             self.show_page("home")
             return
-        
+
         # Set highlights in selection page
         self.pages["highlight_selection"].set_highlights(
             self.session_data["highlights"],
             self.session_data["video_path"],
-            self.session_data["session_dir"]
+            self.session_data["session_dir"],
         )
-        
+
         # Show the page
         self.show_page("highlight_selection")
-        
+
         # Reset processing flag
         self.processing = False
-    
+
     def resume_session(self, session_data: dict):
         """Resume a previous session"""
         # Store session data
         self.session_data = session_data
-        
+
         # Navigate to highlight selection page
         self.show_highlight_selection()
-    
+
     def load_session_clips(self, clips_dir: Path):
         """Load clips from a session's clips folder and show results page"""
         # Change back button to go to session browser instead of processing
-        self.pages["results"].set_back_callback(lambda: self.show_page("session_browser"))
-        
+        self.pages["results"].set_back_callback(
+            lambda: self.show_page("session_browser")
+        )
+
         # Load clips from the specific directory
         self.pages["results"].load_clips(clips_dir)
-        
+
         # Show results page
         self.pages["results"].show_results()
         self.show_page("results")
-    
-    def process_selected_highlights(self, selected_highlights: list, add_captions: bool = False, add_hook: bool = False):
+
+    def process_selected_highlights(
+        self,
+        selected_highlights: list,
+        add_captions: bool = False,
+        add_hook: bool = False,
+    ):
         """NEW: Phase 2 - Process only selected highlights"""
         if not self.session_data:
             messagebox.showerror("Error", "No session data available")
             return
-        
+
         # Store enhancement options
         self.add_captions = add_captions
         self.add_hook = add_hook
-        
+
         # Reset UI for clipping
         self.processing = True
         self.cancelled = False
-        
+
         # Reset clipping page UI
         self.pages["clipping"].reset_ui()
         self.show_page("clipping")
-        
+
         # Start processing in background thread
         threading.Thread(
-            target=self.run_process_selected,
-            args=(selected_highlights,),
-            daemon=True
+            target=self.run_process_selected, args=(selected_highlights,), daemon=True
         ).start()
-    
+
     def run_process_selected(self, selected_highlights: list):
         """Process selected highlights in background thread"""
         try:
             from clipper_core import AutoClipperCore
-            
+
             # Store total clips for progress tracking
             self.total_clips = len(selected_highlights)
             self.current_clip = 0
-            
+
             # Wrapper for log callback with clipping progress
             def log_with_debug(msg):
                 debug_log(msg)
                 self.after(0, lambda: self.update_clipping_status(msg))
-            
+
             # Get config
             ai_providers = self.config.get("ai_providers", {})
             highlight_finder = ai_providers.get("highlight_finder", {})
-            system_prompt = highlight_finder.get("system_message") or self.config.get("system_prompt", None)
-            
+            system_prompt = highlight_finder.get("system_message") or self.config.get(
+                "system_prompt", None
+            )
+
             temperature = self.config.get("temperature", 1.0)
             tts_model = self.config.get("tts_model", "tts-1")
             watermark_settings = self.config.get("watermark", {"enabled": False})
-            credit_watermark_settings = self.config.get("credit_watermark", {"enabled": False})
+            credit_watermark_settings = self.config.get(
+                "credit_watermark", {"enabled": False}
+            )
             face_tracking_mode = self.config.get("face_tracking_mode", "opencv")
-            mediapipe_settings = self.config.get("mediapipe_settings", {
-                "lip_activity_threshold": 0.15,
-                "switch_threshold": 0.3,
-                "min_shot_duration": 90,
-                "center_weight": 0.3
-            })
-            
+            mediapipe_settings = self.config.get(
+                "mediapipe_settings",
+                {
+                    "lip_activity_threshold": 0.15,
+                    "switch_threshold": 0.3,
+                    "min_shot_duration": 90,
+                    "center_weight": 0.3,
+                },
+            )
+
             output_dir = self.config.get("output_dir", str(OUTPUT_DIR))
             model = self.config.get("model", "gpt-4.1")
-            
+
             core = AutoClipperCore(
                 client=self.client,
                 ffmpeg_path=get_ffmpeg_path(),
@@ -1370,42 +1618,46 @@ class YTShortClipperApp(ctk.CTk):
                 ai_providers=self.config.get_resolved_ai_providers(),
                 subtitle_language="id",  # Already downloaded
                 log_callback=log_with_debug,
-                progress_callback=lambda s, p: self.after(0, lambda: self.update_clipping_progress(s, p)),
-                token_callback=lambda a, b, c, d: None,  # No token tracking for clipping
-                cancel_check=lambda: self.cancelled
+                progress_callback=lambda s, p: self.after(
+                    0, lambda: self.update_clipping_progress(s, p)
+                ),
+                token_callback=lambda a, b, c, d: (
+                    None
+                ),  # No token tracking for clipping
+                cancel_check=lambda: self.cancelled,
             )
-            
+
             # Enable GPU acceleration if configured
             gpu_settings = self.config.get("gpu_acceleration", {})
             if gpu_settings.get("enabled", False):
                 core.enable_gpu_acceleration(True)
-            
+
             # Process selected highlights
             core.process_selected_highlights(
                 self.session_data["video_path"],
                 selected_highlights,
                 self.session_data["session_dir"],
                 add_captions=self.add_captions,
-                add_hook=self.add_hook
+                add_hook=self.add_hook,
             )
-            
+
             if not self.cancelled:
                 self.after(0, self.on_clipping_complete)
-                
+
         except Exception as e:
             error_msg = str(e)
             debug_log(f"ERROR: {error_msg}")
             log_error(f"Process selected highlights failed", e)
-            
+
             if self.cancelled or "cancel" in error_msg.lower():
                 self.after(0, self.on_clipping_cancelled)
             else:
                 self.after(0, lambda: self.on_clipping_error(error_msg))
-    
+
     def update_clipping_status(self, msg: str):
         """Update clipping page status"""
         self.pages["clipping"].update_status(msg)
-    
+
     def update_clipping_progress(self, status: str, progress: float):
         """Update clipping progress from clipper_core"""
         # Parse status to extract clip number and title
@@ -1416,14 +1668,14 @@ class YTShortClipperApp(ctk.CTk):
                 clip_part = status.split("Clip ")[1].split(":")[0]  # "1/3"
                 current = int(clip_part.split("/")[0])
                 total = int(clip_part.split("/")[1])
-                
+
                 # Extract title (everything after "Clip X/Y: " and before " (")
                 title_part = status.split(": ", 1)[1]
                 if " (" in title_part:
                     title = title_part.split(" (")[0]
                 else:
                     title = title_part
-                
+
                 # Update UI
                 self.pages["clipping"].update_progress(current, total, title)
                 self.pages["clipping"].update_status(status)
@@ -1433,7 +1685,7 @@ class YTShortClipperApp(ctk.CTk):
         else:
             # Not a clip progress message, just update status
             self.pages["clipping"].update_status(status)
-    
+
     def cancel_processing(self):
         if messagebox.askyesno("Cancel", "Are you sure you want to cancel?"):
             self.cancelled = True
@@ -1444,130 +1696,161 @@ class YTShortClipperApp(ctk.CTk):
             if "clipping" in self.pages:
                 self.pages["clipping"].update_status("⚠️ Cancelling... please wait")
                 self.pages["clipping"].cancel_btn.configure(state="disabled")
-    
+
     def on_cancelled(self):
         """Called when processing is cancelled"""
         self.processing = False
         self.pages["processing"].on_cancelled()
-    
+
     def on_clipping_cancelled(self):
         """Called when clipping is cancelled"""
         self.processing = False
         self.pages["clipping"].on_cancelled()
-    
+
     def on_complete(self):
         self.processing = False
         self.pages["processing"].on_complete()
-        
+
         # Reset back button to default (processing page)
-        self.pages["results"].set_back_callback(self.pages["results"].default_back_callback)
-        
+        self.pages["results"].set_back_callback(
+            self.pages["results"].default_back_callback
+        )
+
         # Load created clips in results page
         self.pages["results"].load_clips()
-    
+
     def on_clipping_complete(self):
         """Called when clipping completes successfully"""
         self.processing = False
         self.pages["clipping"].on_complete()
-    
+
     def on_clipping_error(self, error: str):
         """Called when clipping encounters an error"""
         self.processing = False
         self.pages["clipping"].on_error(error)
-    
+
     def show_browse_after_complete(self):
         """Show browse page after processing complete"""
         self.show_page("browse")
-    
+
     def on_error(self, error):
         self.processing = False
         self.pages["processing"].on_error(error)
-    
+
     def open_output(self):
         output_dir = self.config.get("output_dir", str(OUTPUT_DIR))
         if sys.platform == "win32":
             os.startfile(output_dir)
         else:
-            subprocess.run(["open" if sys.platform == "darwin" else "xdg-open", output_dir])
-    
+            subprocess.run(
+                ["open" if sys.platform == "darwin" else "xdg-open", output_dir]
+            )
+
     def open_discord(self):
         """Open Discord server invite link"""
         import webbrowser
+
         webbrowser.open("https://s.id/ytsdiscord")
-    
+
     def open_github(self):
         """Open GitHub repository"""
         import webbrowser
+
         webbrowser.open("https://github.com/jipraks/yt-short-clipper")
-    
+
     def check_update_silent(self):
         """Check for updates silently on startup"""
         try:
             # Get installation_id from config
             installation_id = self.config.get("installation_id", "unknown")
             url = f"{UPDATE_CHECK_URL}?installation_id={installation_id}&app_version={__version__}"
-            
-            req = urllib.request.Request(url, headers={'User-Agent': 'YT-Short-Clipper'})
+
+            req = urllib.request.Request(
+                url, headers={"User-Agent": "YT-Short-Clipper"}
+            )
             with urllib.request.urlopen(req, timeout=5) as response:
                 data = json.loads(response.read().decode())
                 latest_version = data.get("version", "")
                 download_url = data.get("download_url", "")
                 changelog = data.get("changelog", "")
-                
-                if latest_version and self._compare_versions(latest_version, __version__) > 0:
+
+                if (
+                    latest_version
+                    and self._compare_versions(latest_version, __version__) > 0
+                ):
                     # New version available
-                    self.after(0, lambda: self._show_update_notification(latest_version, download_url, changelog))
+                    self.after(
+                        0,
+                        lambda: self._show_update_notification(
+                            latest_version, download_url, changelog
+                        ),
+                    )
         except Exception as e:
             debug_log(f"Update check failed: {e}")
-    
+
     def check_update_manual(self):
         """Check for updates manually from settings page"""
         try:
             # Get installation_id from config
             installation_id = self.config.get("installation_id", "unknown")
             url = f"{UPDATE_CHECK_URL}?installation_id={installation_id}&app_version={__version__}"
-            
-            req = urllib.request.Request(url, headers={'User-Agent': 'YT-Short-Clipper'})
+
+            req = urllib.request.Request(
+                url, headers={"User-Agent": "YT-Short-Clipper"}
+            )
             with urllib.request.urlopen(req, timeout=10) as response:
                 data = json.loads(response.read().decode())
                 latest_version = data.get("version", "")
                 download_url = data.get("download_url", "")
                 changelog = data.get("changelog", "")
-                
+
                 if not latest_version:
-                    messagebox.showinfo("Update Check", "Could not retrieve version information.")
+                    messagebox.showinfo(
+                        "Update Check", "Could not retrieve version information."
+                    )
                     return
-                
+
                 comparison = self._compare_versions(latest_version, __version__)
-                
+
                 if comparison > 0:
                     # New version available
                     msg = f"New version available: {latest_version}\nCurrent version: {__version__}\n\n"
                     if changelog:
                         msg += f"Changelog:\n{changelog}\n\n"
                     msg += f"Download: {download_url}"
-                    
-                    if messagebox.askyesno("Update Available", msg + "\n\nOpen download page?"):
+
+                    if messagebox.askyesno(
+                        "Update Available", msg + "\n\nOpen download page?"
+                    ):
                         import webbrowser
+
                         webbrowser.open(download_url)
                 elif comparison == 0:
-                    messagebox.showinfo("Update Check", f"You are using the latest version ({__version__})")
+                    messagebox.showinfo(
+                        "Update Check",
+                        f"You are using the latest version ({__version__})",
+                    )
                 else:
-                    messagebox.showinfo("Update Check", f"Your version ({__version__}) is newer than the latest release ({latest_version})")
+                    messagebox.showinfo(
+                        "Update Check",
+                        f"Your version ({__version__}) is newer than the latest release ({latest_version})",
+                    )
         except Exception as e:
-            messagebox.showerror("Update Check Failed", f"Could not check for updates:\n{str(e)}")
-    
+            messagebox.showerror(
+                "Update Check Failed", f"Could not check for updates:\n{str(e)}"
+            )
+
     def _compare_versions(self, v1: str, v2: str) -> int:
         """Compare two version strings. Returns: 1 if v1 > v2, -1 if v1 < v2, 0 if equal"""
         try:
-            parts1 = [int(x) for x in v1.split('.')]
-            parts2 = [int(x) for x in v2.split('.')]
-            
+            parts1 = [int(x) for x in v1.split(".")]
+            parts2 = [int(x) for x in v2.split(".")]
+
             # Pad shorter version with zeros
             max_len = max(len(parts1), len(parts2))
             parts1 += [0] * (max_len - len(parts1))
             parts2 += [0] * (max_len - len(parts2))
-            
+
             for p1, p2 in zip(parts1, parts2):
                 if p1 > p2:
                     return 1
@@ -1576,45 +1859,49 @@ class YTShortClipperApp(ctk.CTk):
             return 0
         except:
             return 0
-    
-    def _show_update_notification(self, latest_version: str, download_url: str, changelog: str = ""):
+
+    def _show_update_notification(
+        self, latest_version: str, download_url: str, changelog: str = ""
+    ):
         """Show update notification popup"""
         msg = f"New version available: {latest_version}\nCurrent version: {__version__}\n\n"
         if changelog:
             msg += f"What's new:\n{changelog}\n\n"
         msg += "Would you like to download it?"
-        
+
         if messagebox.askyesno("Update Available", msg):
             import webbrowser
+
             webbrowser.open(download_url)
 
 
 def handle_exception(exc_type, exc_value, exc_traceback):
     """Global exception handler to log uncaught exceptions"""
     import traceback as tb
-    
+
     # Don't log KeyboardInterrupt
     if issubclass(exc_type, KeyboardInterrupt):
         sys.__excepthook__(exc_type, exc_value, exc_traceback)
         return
-    
+
     # Print full traceback to terminal (for debugging)
     try:
-        print("\n" + "="*60, file=sys.__stderr__)
+        print("\n" + "=" * 60, file=sys.__stderr__)
         print("UNCAUGHT EXCEPTION - Full Traceback:", file=sys.__stderr__)
-        print("="*60, file=sys.__stderr__)
+        print("=" * 60, file=sys.__stderr__)
         tb.print_exception(exc_type, exc_value, exc_traceback, file=sys.__stderr__)
-        print("="*60 + "\n", file=sys.__stderr__)
+        print("=" * 60 + "\n", file=sys.__stderr__)
         sys.__stderr__.flush()
     except:
         pass
-    
+
     # Log the exception
     log_error("Uncaught exception", exc_value)
-    
+
     # Show error dialog to user
     try:
         import tkinter.messagebox as mb
+
         error_log = get_error_log_path()
         msg = f"An unexpected error occurred:\n\n{exc_value}\n\n"
         if error_log:
@@ -1623,7 +1910,7 @@ def handle_exception(exc_type, exc_value, exc_traceback):
         mb.showerror("Unexpected Error", msg)
     except:
         pass
-    
+
     # Call default handler
     sys.__excepthook__(exc_type, exc_value, exc_traceback)
 
@@ -1631,7 +1918,7 @@ def handle_exception(exc_type, exc_value, exc_traceback):
 def main():
     # Set global exception handler
     sys.excepthook = handle_exception
-    
+
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     app = YTShortClipperApp()
     app.mainloop()

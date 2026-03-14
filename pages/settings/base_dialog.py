@@ -3,13 +3,14 @@ Base class for settings sub-pages (embedded in main window)
 """
 
 import customtkinter as ctk
+from components.ui_theme import Colors, Fonts, BorderRadius
 
 
 class BaseSettingsSubPage(ctk.CTkFrame):
     """Base class for settings sub-pages"""
     
     def __init__(self, parent, title, on_back_callback):
-        super().__init__(parent, fg_color=("#1a1a1a", "#0a0a0a"))
+        super().__init__(parent, fg_color=Colors.BG_PRIMARY)
         self.pack(fill="both", expand=True)
         
         self.title = title
@@ -36,10 +37,12 @@ class BaseSettingsSubPage(ctk.CTkFrame):
     
     def create_section(self, title):
         """Create a section with title"""
-        section = ctk.CTkFrame(self.content, fg_color=("gray90", "gray17"))
+        section = ctk.CTkFrame(self.content, fg_color=Colors.CARD_BG,
+                               border_width=1, border_color=Colors.BORDER,
+                               corner_radius=BorderRadius.MD)
         section.pack(fill="x", pady=(0, 10))
         
-        ctk.CTkLabel(section, text=title, font=ctk.CTkFont(size=13, weight="bold")).pack(
+        ctk.CTkLabel(section, text=title, font=Fonts.heading_sm(), text_color=Colors.TEXT_PRIMARY).pack(
             anchor="w", padx=15, pady=(12, 8))
         
         return section
@@ -49,9 +52,11 @@ class BaseSettingsSubPage(ctk.CTkFrame):
         row = ctk.CTkFrame(parent, fg_color="transparent")
         row.pack(fill="x", padx=15, pady=(0, 10))
         
-        ctk.CTkLabel(row, text=label, font=ctk.CTkFont(size=11)).pack(anchor="w")
+        ctk.CTkLabel(row, text=label, font=Fonts.body_sm(), text_color=Colors.TEXT_SECONDARY).pack(anchor="w")
         
-        entry = ctk.CTkEntry(row, placeholder_text=placeholder, show=show, height=36, width=width)
+        entry = ctk.CTkEntry(row, placeholder_text=placeholder, show=show, height=36, width=width,
+                     fg_color=Colors.BG_SECONDARY, border_color=Colors.BORDER,
+                     text_color=Colors.TEXT_PRIMARY)
         entry.pack(fill="x", pady=(5, 0))
         
         return entry
@@ -61,9 +66,12 @@ class BaseSettingsSubPage(ctk.CTkFrame):
         row = ctk.CTkFrame(parent, fg_color="transparent")
         row.pack(fill="x", padx=15, pady=(0, 10))
         
-        ctk.CTkLabel(row, text=label, font=ctk.CTkFont(size=11)).pack(anchor="w")
+        ctk.CTkLabel(row, text=label, font=Fonts.body_sm(), text_color=Colors.TEXT_SECONDARY).pack(anchor="w")
         
-        dropdown = ctk.CTkOptionMenu(row, values=values, variable=variable, height=36)
+        dropdown = ctk.CTkOptionMenu(row, values=values, variable=variable, height=36,
+                         fg_color=Colors.BTN_PRIMARY, button_color=Colors.BTN_PRIMARY,
+                         button_hover_color=Colors.BTN_PRIMARY_HOVER,
+                         text_color=Colors.TEXT_PRIMARY)
         dropdown.pack(fill="x", pady=(5, 0))
         
         return dropdown
@@ -72,7 +80,7 @@ class BaseSettingsSubPage(ctk.CTkFrame):
         """Create save button at bottom of content"""
         ctk.CTkButton(self.content, text=text, height=45,
             font=ctk.CTkFont(size=14, weight="bold"),
-            fg_color=("#27ae60", "#27ae60"), hover_color=("#229954", "#229954"),
+            fg_color=Colors.BTN_SECONDARY, hover_color=Colors.BTN_SECONDARY_HOVER,
             command=command).pack(fill="x", pady=(10, 0))
     
     def open_github(self):

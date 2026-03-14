@@ -5,6 +5,7 @@ Processing page for video processing workflow
 import customtkinter as ctk
 from components.progress_step import ProgressStep
 from utils.logger import get_error_log_path
+from components.ui_theme import Colors
 
 
 class ProcessingPage(ctk.CTkFrame):
@@ -37,7 +38,7 @@ class ProcessingPage(ctk.CTkFrame):
         """Create the processing page UI"""
         from components.page_layout import PageHeader, PageFooter
         
-        self.configure(fg_color=("#1a1a1a", "#0a0a0a"))
+        self.configure(fg_color=Colors.BG_PRIMARY)
         
         # Header
         header = PageHeader(self, self, show_nav_buttons=False, show_back_button=True, page_title="🎬 Processing")
@@ -47,7 +48,7 @@ class ProcessingPage(ctk.CTkFrame):
         main.pack(fill="both", expand=True, padx=20, pady=(0, 20))
         
         # Progress steps - 2 cards horizontal (NEW FLOW)
-        steps_frame = ctk.CTkFrame(main, fg_color=("gray90", "gray17"))
+        steps_frame = ctk.CTkFrame(main, fg_color=Colors.CARD_BG, border_width=1, border_color=Colors.BORDER)
         steps_frame.pack(fill="x", padx=15, pady=15)
         
         ctk.CTkLabel(steps_frame, text="Progress", font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", padx=15, pady=(12, 8))
@@ -82,8 +83,8 @@ class ProcessingPage(ctk.CTkFrame):
         row1 = ctk.CTkFrame(btn_frame, fg_color="transparent")
         row1.pack(fill="x", pady=(0, 5))
         
-        self.cancel_btn = ctk.CTkButton(row1, text="❌ Cancel", height=45, fg_color="#c0392b", 
-            hover_color="#e74c3c", command=self.on_cancel)
+        self.cancel_btn = ctk.CTkButton(row1, text="❌ Cancel", height=45, fg_color=Colors.BTN_DANGER,
+            hover_color=Colors.BTN_DANGER_HOVER, command=self.on_cancel)
         self.cancel_btn.pack(side="left", fill="x", expand=True, padx=(0, 5))
         
         self.back_btn = ctk.CTkButton(row1, text="← Back", height=45, state="disabled", command=self.on_back)
@@ -96,7 +97,7 @@ class ProcessingPage(ctk.CTkFrame):
         self.open_btn.pack(side="left", fill="x", expand=True, padx=(0, 5))
         
         self.results_btn = ctk.CTkButton(row2, text="📂 Browse Videos", height=45, state="disabled", 
-            fg_color="#27ae60", hover_color="#2ecc71", command=self.on_browse)
+            fg_color=Colors.BTN_SECONDARY, hover_color=Colors.BTN_SECONDARY_HOVER, command=self.on_browse)
         self.results_btn.pack(side="left", fill="x", expand=True, padx=(5, 0))
         
         # Footer

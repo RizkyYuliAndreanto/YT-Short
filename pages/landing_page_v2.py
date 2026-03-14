@@ -71,8 +71,8 @@ class LandingPage(ctk.CTkFrame):
         title_frame = ctk.CTkFrame(left, fg_color="transparent")
         title_frame.pack(side="left")
         
-        create_styled_label(title_frame, "YT Short Clipper", style="heading_lg").pack(anchor="w")
-        create_styled_label(title_frame, "AI-Powered Video Content Creator", 
+        create_styled_label(title_frame, "CONTEN CREATOR AGENT", style="heading_lg").pack(anchor="w")
+        create_styled_label(title_frame, "AI-Powered Content Operating System", 
             style="muted").pack(anchor="w")
         
         # Right side: Action buttons
@@ -94,6 +94,15 @@ class LandingPage(ctk.CTkFrame):
             tooltip="Configure API keys, output settings, and preferences",
             icon="⚙️")
         settings_btn.pack(side="left")
+
+        if hasattr(self.app, "toggle_theme_mode"):
+            mode_text = "Dark" if str(getattr(self.app, "get_theme_mode", lambda: "light")()).lower().startswith("light") else "Light"
+            theme_btn = create_styled_button(right, f"{mode_text} Mode",
+                command=self.app.toggle_theme_mode,
+                style="ghost", width=110, height=32,
+                tooltip="Switch between bright and dark interface",
+                icon="🌓")
+            theme_btn.pack(side="left", padx=(Spacing.SM, 0))
     
     def _load_logo(self, parent):
         """Load and display app logo"""
@@ -262,22 +271,15 @@ class LandingPage(ctk.CTkFrame):
         # Links row
         links_frame = ctk.CTkFrame(footer, fg_color="transparent")
         links_frame.pack()
-        
-        # Discord
-        discord_btn = create_styled_button(links_frame, "Discord", 
-            command=lambda: webbrowser.open("https://s.id/ytsdiscord"),
-            style="ghost", width=90, height=28,
-            tooltip="Join our Discord community for support and updates",
-            icon="💬")
-        discord_btn.pack(side="left", padx=Spacing.XS)
-        
-        # GitHub
-        github_btn = create_styled_button(links_frame, "GitHub",
-            command=lambda: webbrowser.open("https://github.com/jipraks/yt-short-clipper"),
-            style="ghost", width=90, height=28,
-            tooltip="View source code and contribute on GitHub",
-            icon="⭐")
-        github_btn.pack(side="left", padx=Spacing.XS)
+
+        if hasattr(self.app, "toggle_theme_mode"):
+            mode_text = "Dark" if str(getattr(self.app, "get_theme_mode", lambda: "light")()).lower().startswith("light") else "Light"
+            mode_btn = create_styled_button(links_frame, f"{mode_text} Mode",
+                command=self.app.toggle_theme_mode,
+                style="ghost", width=120, height=28,
+                tooltip="Toggle application appearance mode",
+                icon="🌓")
+            mode_btn.pack(side="left", padx=Spacing.XS)
         
         # Browse Videos
         browse_btn = create_styled_button(links_frame, "Browse Videos",
@@ -302,7 +304,7 @@ class LandingPage(ctk.CTkFrame):
         messagebox.showinfo("Coming Soon 🚀",
             f"{feature_name} is under development!\n\n"
             f"This feature will be available in a future update.\n"
-            f"Join our Discord for the latest news!")
+            f"Stay tuned for upcoming releases!")
     
     # Navigation methods for compatibility
     def show_page(self, page_name):

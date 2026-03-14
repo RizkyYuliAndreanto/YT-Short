@@ -6,6 +6,7 @@ import customtkinter as ctk
 from pathlib import Path
 from PIL import Image
 from datetime import datetime
+from components.ui_theme import Colors, Fonts, BorderRadius, create_styled_button
 
 
 class PageHeader(ctk.CTkFrame):
@@ -35,10 +36,13 @@ class PageHeader(ctk.CTkFrame):
                 elif hasattr(self.app, 'show_page'):
                     self.app.show_page("landing")
             
-            ctk.CTkButton(left_frame, text="←", width=40, fg_color="transparent", 
-                hover_color=("gray75", "gray25"), 
+            ctk.CTkButton(left_frame, text="←", width=40,
+                fg_color=Colors.BG_TERTIARY, hover_color=Colors.CARD_HOVER,
+                border_width=1, border_color=Colors.BORDER,
+                text_color=Colors.TEXT_PRIMARY,
                 command=go_back).pack(side="left")
-            ctk.CTkLabel(left_frame, text=self.page_title, font=ctk.CTkFont(size=22, weight="bold")).pack(side="left", padx=10)
+            ctk.CTkLabel(left_frame, text=self.page_title, font=Fonts.heading_lg(),
+                         text_color=Colors.TEXT_PRIMARY).pack(side="left", padx=10)
             
             # Right side: Logo + tagline
             right_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -63,9 +67,10 @@ class PageHeader(ctk.CTkFrame):
             
             tagline_col = ctk.CTkFrame(right_frame, fg_color="transparent")
             tagline_col.pack(side="left")
-            ctk.CTkLabel(tagline_col, text="YT Short Clipper", font=ctk.CTkFont(size=14, weight="bold")).pack(anchor="w")
-            ctk.CTkLabel(tagline_col, text="Turn long YouTube videos into viral shorts — Powered by AI", 
-                font=ctk.CTkFont(size=9), text_color="gray").pack(anchor="w")
+            ctk.CTkLabel(tagline_col, text="CONTEN CREATOR AGENT", font=Fonts.heading_sm(),
+                         text_color=Colors.TEXT_PRIMARY).pack(anchor="w")
+            ctk.CTkLabel(tagline_col, text="Create pro short-form content with AI workflow",
+                font=Fonts.caption(), text_color=Colors.TEXT_MUTED).pack(anchor="w")
             return
         
         # Normal mode: App icon + title on left
@@ -91,14 +96,22 @@ class PageHeader(ctk.CTkFrame):
         
         title_col = ctk.CTkFrame(title_frame, fg_color="transparent")
         title_col.pack(side="left")
-        ctk.CTkLabel(title_col, text="YT Short Clipper", font=ctk.CTkFont(size=20, weight="bold")).pack(anchor="w")
-        ctk.CTkLabel(title_col, text="Turn long YouTube videos into viral shorts — Powered by AI", font=ctk.CTkFont(size=11), 
-            text_color="gray").pack(anchor="w")
+        ctk.CTkLabel(title_col, text="CONTEN CREATOR AGENT", font=Fonts.heading_md(),
+                     text_color=Colors.TEXT_PRIMARY).pack(anchor="w")
+        ctk.CTkLabel(title_col, text="Professional AI studio for short-form content", font=Fonts.body_sm(),
+            text_color=Colors.TEXT_MUTED).pack(anchor="w")
         
         # Navigation buttons on right (if enabled)
         if self.show_nav_buttons:
             nav_frame = ctk.CTkFrame(self, fg_color="transparent")
             nav_frame.pack(side="right")
+
+            if hasattr(self.app, "toggle_theme_mode"):
+                mode_text = "Dark" if str(getattr(self.app, "get_theme_mode", lambda: "light")()).lower().startswith("light") else "Light"
+                create_styled_button(nav_frame, f"{mode_text} Mode",
+                    command=self.app.toggle_theme_mode,
+                    style="secondary", width=110, height=40,
+                    tooltip="Ganti tampilan terang/gelap").pack(side="left", padx=3)
             
             # Load button icons if available
             try:
@@ -129,17 +142,20 @@ class PageHeader(ctk.CTkFrame):
             
             ctk.CTkButton(nav_frame, text="Settings", image=settings_icon, compound="left",
                 width=90, height=40, font=ctk.CTkFont(size=11),
-                fg_color=("#2b2b2b", "#1a1a1a"), hover_color=("#3a3a3a", "#2a2a2a"), corner_radius=10,
+                fg_color=Colors.BG_TERTIARY, hover_color=Colors.CARD_HOVER,
+                border_width=1, border_color=Colors.BORDER, corner_radius=BorderRadius.MD,
                 command=lambda: self.app.show_page("settings")).pack(side="left", padx=3)
             
             ctk.CTkButton(nav_frame, text="API", image=api_icon, compound="left",
                 width=70, height=40, font=ctk.CTkFont(size=11),
-                fg_color=("#2b2b2b", "#1a1a1a"), hover_color=("#3a3a3a", "#2a2a2a"), corner_radius=10,
+                fg_color=Colors.BG_TERTIARY, hover_color=Colors.CARD_HOVER,
+                border_width=1, border_color=Colors.BORDER, corner_radius=BorderRadius.MD,
                 command=lambda: self.app.show_page("api_status")).pack(side="left", padx=3)
             
             ctk.CTkButton(nav_frame, text="Library", image=lib_icon, compound="left",
                 width=85, height=40, font=ctk.CTkFont(size=11),
-                fg_color=("#2b2b2b", "#1a1a1a"), hover_color=("#3a3a3a", "#2a2a2a"), corner_radius=10,
+                fg_color=Colors.BG_TERTIARY, hover_color=Colors.CARD_HOVER,
+                border_width=1, border_color=Colors.BORDER, corner_radius=BorderRadius.MD,
                 command=lambda: self.app.show_page("lib_status")).pack(side="left", padx=3)
 
 
@@ -156,7 +172,7 @@ class PageFooter(ctk.CTkFrame):
     def create_footer(self):
         """Create footer with separator, copyright, and links"""
         # Separator line
-        separator = ctk.CTkFrame(self, height=1, fg_color=("#3a3a3a", "#2a2a2a"))
+        separator = ctk.CTkFrame(self, height=1, fg_color=Colors.BORDER)
         separator.pack(fill="x", pady=(0, 12))
         
         # Footer content
@@ -167,34 +183,28 @@ class PageFooter(ctk.CTkFrame):
         try:
             from version import __version__
             current_year = datetime.now().year
-            copyright_text = f"© {current_year} YT Short Clipper • v{__version__}"
+            copyright_text = f"© {current_year} CONTEN CREATOR AGENT • v{__version__}"
         except:
-            copyright_text = "© 2026 YT Short Clipper"
+            copyright_text = "© 2026 CONTEN CREATOR AGENT"
         
         ctk.CTkLabel(footer_content, text=copyright_text, 
-            font=ctk.CTkFont(size=10), text_color="gray", anchor="w").pack(side="left")
+            font=Fonts.caption(), text_color=Colors.TEXT_MUTED, anchor="w").pack(side="left")
         
-        # Links on right
+        # Footer actions on right (source links removed intentionally)
         links_frame = ctk.CTkFrame(footer_content, fg_color="transparent")
         links_frame.pack(side="right")
-        
-        # GitHub link
-        github_link = ctk.CTkLabel(links_frame, text="⭐ GitHub", 
-            font=ctk.CTkFont(size=11), text_color="#ffffff", cursor="hand2")
-        github_link.pack(side="left", padx=(0, 15))
-        github_link.bind("<Button-1>", lambda e: self.app.open_github())
-        
-        # Get AI API Key link (cyan/teal)
-        api_key_link = ctk.CTkLabel(links_frame, text="🔑 Get AI API Key", 
-            font=ctk.CTkFont(size=11), text_color="#00CED1", cursor="hand2")
-        api_key_link.pack(side="left", padx=(0, 15))
+
+        api_key_link = ctk.CTkLabel(links_frame, text="🔑 AI API Key", 
+            font=Fonts.body_sm(), text_color=Colors.ACCENT_PRIMARY, cursor="hand2")
+        api_key_link.pack(side="left", padx=(0, 14))
         api_key_link.bind("<Button-1>", lambda e: self.open_ai_api_key_page())
-        
-        # Join Discord link (blurple)
-        discord_link = ctk.CTkLabel(links_frame, text="💬 Join Discord Server", 
-            font=ctk.CTkFont(size=11), text_color="#5865F2", cursor="hand2")
-        discord_link.pack(side="left")
-        discord_link.bind("<Button-1>", lambda e: self.app.open_discord())
+
+        if hasattr(self.app, "toggle_theme_mode"):
+            mode_text = "Dark Mode" if str(getattr(self.app, "get_theme_mode", lambda: "light")()).lower().startswith("light") else "Light Mode"
+            toggle_link = ctk.CTkLabel(links_frame, text=f"🌓 {mode_text}",
+                font=Fonts.body_sm(), text_color=Colors.ACCENT_SECONDARY, cursor="hand2")
+            toggle_link.pack(side="left")
+            toggle_link.bind("<Button-1>", lambda e: self.app.toggle_theme_mode())
     
     def open_ai_api_key_page(self):
         """Open AI API Key page"""

@@ -6,6 +6,7 @@ Shows 4 main modes: YouTube Clipper, AI Dubbing Studio, Multi-Clip Compiler, Sho
 import customtkinter as ctk
 from PIL import Image
 from pathlib import Path
+from components.ui_theme import Colors
 
 
 class LandingPage(ctk.CTkFrame):
@@ -20,7 +21,7 @@ class LandingPage(ctk.CTkFrame):
     
     def create_ui(self):
         """Create the landing page UI"""
-        self.configure(fg_color=("#1a1a1a", "#0a0a0a"))
+        self.configure(fg_color=Colors.BG_PRIMARY)
         
         # Header
         self.create_header()
@@ -124,9 +125,9 @@ class LandingPage(ctk.CTkFrame):
         title_frame = ctk.CTkFrame(left_header, fg_color="transparent")
         title_frame.pack(side="left")
         
-        ctk.CTkLabel(title_frame, text="YT Short Clipper", 
+        ctk.CTkLabel(title_frame, text="CONTEN CREATOR AGENT", 
             font=ctk.CTkFont(size=24, weight="bold")).pack(anchor="w")
-        ctk.CTkLabel(title_frame, text="AI-Powered Video Content Creator",
+        ctk.CTkLabel(title_frame, text="AI-Powered Content Operating System",
             font=ctk.CTkFont(size=12), text_color="gray").pack(anchor="w")
         
         # Right side - Settings button
@@ -207,23 +208,18 @@ class LandingPage(ctk.CTkFrame):
         links_frame = ctk.CTkFrame(footer, fg_color="transparent")
         links_frame.pack()
         
-        # Discord
-        discord_btn = ctk.CTkButton(links_frame, text="💬 Discord", width=80, height=28,
-            fg_color="transparent", hover_color=("gray75", "gray25"),
-            font=ctk.CTkFont(size=11), command=self.open_discord)
-        discord_btn.pack(side="left", padx=5)
-        
-        # GitHub
-        github_btn = ctk.CTkButton(links_frame, text="⭐ GitHub", width=80, height=28,
-            fg_color="transparent", hover_color=("gray75", "gray25"),
-            font=ctk.CTkFont(size=11), command=self.open_github)
-        github_btn.pack(side="left", padx=5)
-        
         # Browse Videos
         browse_btn = ctk.CTkButton(links_frame, text="📂 Browse Videos", width=110, height=28,
             fg_color="transparent", hover_color=("gray75", "gray25"),
             font=ctk.CTkFont(size=11), command=lambda: self.app.show_page("browse"))
         browse_btn.pack(side="left", padx=5)
+
+        if hasattr(self.app, "toggle_theme_mode"):
+            mode_text = "Dark Mode" if str(getattr(self.app, "get_theme_mode", lambda: "light")()).lower().startswith("light") else "Light Mode"
+            mode_btn = ctk.CTkButton(links_frame, text=f"🌓 {mode_text}", width=120, height=28,
+                fg_color="transparent", hover_color=("gray75", "gray25"),
+                font=ctk.CTkFont(size=11), command=self.app.toggle_theme_mode)
+            mode_btn.pack(side="left", padx=5)
         
         # Version
         try:
