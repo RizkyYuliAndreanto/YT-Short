@@ -331,8 +331,11 @@ class TTSVideoSync:
                 ]
         else:
             # Replace audio entirely
+            # -fflags +genpts regenerates PTS to avoid frozen initial frames
+            # -avoid_negative_ts prevents timestamp discontinuities from concat input
             cmd = [
                 self.ffmpeg_path,
+                "-fflags", "+genpts",
                 "-i", video_path,
                 "-i", tts_audio_path,
                 "-map", "0:v",
@@ -341,6 +344,7 @@ class TTSVideoSync:
                 "-c:a", "aac",
                 "-b:a", "192k",
                 "-shortest",
+                "-avoid_negative_ts", "make_zero",
                 "-y",
                 output_path
             ]
@@ -349,7 +353,10 @@ class TTSVideoSync:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
         
         if result.returncode != 0:
-            raise Exception(f"FFmpeg mix error: {result.stderr[:500]}")
+            # Show tail of stderr (actual error) not head (version info)
+            err_lines = [l for l in result.stderr.splitlines() if l.strip()]
+            err_msg = '\n'.join(err_lines[-5:]) if err_lines else result.stderr[-500:]
+            raise Exception(f"FFmpeg mix error: {err_msg}")
         
         return output_path
     
@@ -467,12 +474,16 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         # Use GPU encoding if available (subtitle burn requires re-encode)
         enc_args = self._get_video_encoder_args()
         
+        # -fflags +genpts ensures clean PTS from input (fixes frozen frames from concat/copy)
         cmd = [
             self.ffmpeg_path,
+            "-fflags", "+genpts",
             "-i", video_path,
             "-vf", f"ass='{sub_path_escaped}'",
         ] + enc_args + [
+            "-bf", "0",
             "-c:a", "copy",
+            "-movflags", "+faststart",
             "-y",
             output_path
         ]
@@ -484,10 +495,13 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             # Try SRT format
             cmd = [
                 self.ffmpeg_path,
+                "-fflags", "+genpts",
                 "-i", video_path,
                 "-vf", f"subtitles='{sub_path_escaped}'",
             ] + enc_args + [
+                "-bf", "0",
                 "-c:a", "copy",
+                "-movflags", "+faststart",
                 "-y",
                 output_path
             ]
@@ -507,7 +521,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     
     def _probe_video_dimensions(self, video_path: str) -> Tuple[int, int]:
         """Get video width and height via ffprobe"""
-        ffprobe = self.ffmpeg_path.replace("ffmpeg", "ffprobe")
+        ffprobe_name = "ffprobe.exe" if os.name == "nt" else "ffprobe"
+        ffprobe = os.path.join(os.path.dirname(self.ffmpeg_path), ffprobe_name)
         cmd = [
             ffprobe, "-v", "error",
             "-select_streams", "v:0",
@@ -771,7 +786,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                                            sub_removal_config: Optional[Dict] = None,
                                            bgm_url: Optional[str] = None,
                                            bgm_volume: float = 0.15,
-                                           progress_callback: Optional[Callable] = None) -> Dict:
+                                           progress_callback: Optional[Callable] = None,
+                                           pregenerated_tts: Optional[List[Dict]] = None) -> Dict:
         """
         Complete segment-based dubbing pipeline:
         0. (Optional) Remove hardcoded subtitles / Download BGM
@@ -861,65 +877,100 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             
             # ====== Step 1: Generate TTS per segment (5-40%) ======
             step1_start = _time.time()
-            print(f"\n[STEP 1/4] Generating TTS for {total} segments...")
             
-            for i, seg in enumerate(timed_segments):
-                text = seg.get("text", "").strip()
-                if not text:
-                    continue
-                
-                seg_start = float(seg.get("start", 0))
-                seg_end = float(seg.get("end", seg_start + 5))
-                target_duration = seg_end - seg_start
-                
-                pct = 5 + (i / max(total, 1) * 35)
+            if pregenerated_tts:
+                # Use pre-generated TTS audio from TTS Studio
+                print(f"\n[STEP 1/4] Using {len(pregenerated_tts)} pre-generated TTS segments...")
                 if progress_callback:
-                    progress_callback(pct, f"🔊 TTS segment {i+1}/{total} [{self._fmt_time(seg_start)}-{self._fmt_time(seg_end)}]")
+                    progress_callback(35, f"🔊 Using {len(pregenerated_tts)} pre-generated TTS segments")
                 
-                seg_path = os.path.join(temp_dir, f"seg_{i:03d}.mp3")
-                
-                seg_t = _time.time()
-                # Generate TTS at configured speed
-                audio_path, duration, word_timings = self.tts_manager.generate_audio_sync(
-                    text, seg_path
-                )
-                
-                rate_adjusted = False
-                # Auto rate adjustment: if TTS is too long for the time slot
-                if duration > target_duration * 1.15 and target_duration > 0.5:
-                    speed_factor = duration / target_duration
-                    max_speed = 1.40  # cap at +40% speed
-                    actual_speed = min(speed_factor, max_speed)
-                    rate_pct = int((actual_speed - 1) * 100)
+                for i, ptts in enumerate(pregenerated_tts):
+                    seg_start = float(ptts.get("target_start", ptts.get("start", 0)))
+                    duration = float(ptts.get("tts_duration", 0))
+                    audio_path = ptts.get("audio_path", "")
+                    text = ptts.get("text", "")
                     
-                    # Save original rate, generate faster, restore
-                    old_rate = self.tts_manager.engine.rate
-                    self.tts_manager.engine.set_rate(f"+{rate_pct}%")
+                    if not audio_path or not os.path.exists(audio_path):
+                        print(f"  ⚠ Seg {i+1}: audio file missing, skipping")
+                        continue
+                    
+                    print(f"  [{i+1}/{len(pregenerated_tts)}] {self._fmt_time(seg_start)} | "
+                          f"TTS={duration:.1f}s | \"{text[:40]}{'...' if len(text)>40 else ''}\"")
+                    
+                    # Offset word timings to absolute video position
+                    word_timings = ptts.get("word_timings", [])
+                    if word_timings:
+                        for wt in word_timings:
+                            wt["start"] = wt.get("start", 0) + seg_start
+                        all_word_timings.extend(word_timings)
+                    
+                    tts_results.append(TTSSegment(
+                        text=text,
+                        start_time=seg_start,
+                        end_time=seg_start + duration,
+                        audio_path=audio_path,
+                        duration=duration
+                    ))
+            else:
+                print(f"\n[STEP 1/4] Generating TTS for {total} segments...")
+                
+                for i, seg in enumerate(timed_segments):
+                    text = seg.get("text", "").strip()
+                    if not text:
+                        continue
+                    
+                    seg_start = float(seg.get("start", 0))
+                    seg_end = float(seg.get("end", seg_start + 5))
+                    target_duration = seg_end - seg_start
+                    
+                    pct = 5 + (i / max(total, 1) * 35)
+                    if progress_callback:
+                        progress_callback(pct, f"🔊 TTS segment {i+1}/{total} [{self._fmt_time(seg_start)}-{self._fmt_time(seg_end)}]")
+                    
+                    seg_path = os.path.join(temp_dir, f"seg_{i:03d}.mp3")
+                    
+                    seg_t = _time.time()
+                    # Generate TTS at configured speed
                     audio_path, duration, word_timings = self.tts_manager.generate_audio_sync(
                         text, seg_path
                     )
-                    self.tts_manager.engine.set_rate(old_rate)
-                    rate_adjusted = True
-                
-                elapsed = _time.time() - seg_t
-                rate_info = f" (rate+{rate_pct}%)" if rate_adjusted else ""
-                print(f"  [{i+1}/{total}] {self._fmt_time(seg_start)}-{self._fmt_time(seg_end)} | "
-                      f"TTS={duration:.1f}s / target={target_duration:.1f}s{rate_info} | "
-                      f"{elapsed:.1f}s | \"{text[:40]}{'...' if len(text)>40 else ''}\"")
-                
-                # Offset word timings to absolute video position
-                if word_timings:
-                    for wt in word_timings:
-                        wt["start"] = wt.get("start", 0) + seg_start
-                    all_word_timings.extend(word_timings)
-                
-                tts_results.append(TTSSegment(
-                    text=text,
-                    start_time=seg_start,
-                    end_time=seg_start + duration,
-                    audio_path=seg_path,
-                    duration=duration
-                ))
+                    
+                    rate_adjusted = False
+                    # Auto rate adjustment: if TTS is too long for the time slot
+                    if duration > target_duration * 1.15 and target_duration > 0.5:
+                        speed_factor = duration / target_duration
+                        max_speed = 1.40  # cap at +40% speed
+                        actual_speed = min(speed_factor, max_speed)
+                        rate_pct = int((actual_speed - 1) * 100)
+                        
+                        # Save original rate, generate faster, restore
+                        old_rate = self.tts_manager.engine.rate
+                        self.tts_manager.engine.set_rate(f"+{rate_pct}%")
+                        audio_path, duration, word_timings = self.tts_manager.generate_audio_sync(
+                            text, seg_path
+                        )
+                        self.tts_manager.engine.set_rate(old_rate)
+                        rate_adjusted = True
+                    
+                    elapsed = _time.time() - seg_t
+                    rate_info = f" (rate+{rate_pct}%)" if rate_adjusted else ""
+                    print(f"  [{i+1}/{total}] {self._fmt_time(seg_start)}-{self._fmt_time(seg_end)} | "
+                          f"TTS={duration:.1f}s / target={target_duration:.1f}s{rate_info} | "
+                          f"{elapsed:.1f}s | \"{text[:40]}{'...' if len(text)>40 else ''}\"")
+                    
+                    # Offset word timings to absolute video position
+                    if word_timings:
+                        for wt in word_timings:
+                            wt["start"] = wt.get("start", 0) + seg_start
+                        all_word_timings.extend(word_timings)
+                    
+                    tts_results.append(TTSSegment(
+                        text=text,
+                        start_time=seg_start,
+                        end_time=seg_start + duration,
+                        audio_path=seg_path,
+                        duration=duration
+                    ))
             
             step1_time = _time.time() - step1_start
             print(f"[STEP 1/4] ✅ Done: {len(tts_results)} segments in {step1_time:.1f}s")

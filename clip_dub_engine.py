@@ -29,156 +29,359 @@ from utils.helpers import get_ffmpeg_path, get_ytdlp_path
 
 # ─── Pre-defined Patterns ──────────────────────────────────────────
 PATTERNS = {
+    "documentary": {
+        "id": "documentary",
+        "name": "Dokumenter / Fakta Alam",
+        "icon": "🌍",
+        "description": "Video edukasi, dokumenter alam, sains, sejarah — rangkum jadi fakta-fakta padat yang bikin takjub.",
+        "example": "Ringkas dokumenter tentang elang peregrine jadi fakta-fakta menarik 60 detik",
+        "tags": ["documentary", "nature", "science", "education", "wildlife", "animal", "history", "planet", "sea", "ocean", "space"],
+        "clip_prompt": (
+            "Cari klip yang berisi fakta paling menarik dan visual paling memukau. "
+            "Prioritaskan: close-up subjek utama, momen aksi dramatis (berburu, terbang, dll), "
+            "fakta mengejutkan dengan visual pendukung, dan momen yang menunjukkan skala/perbandingan. "
+            "Hindari bagian perkenalan generik dan filler tanpa informasi baru."
+        ),
+        "script_prompt": (
+            "Buat narasi dokumenter singkat yang kaya fakta dan memukau. "
+            "ATURAN: "
+            "- Hook 3 detik pertama: langsung sebut subjek + fakta paling mengejutkan. "
+            "- Setiap segment: 1 fakta utama + detail pendukung yang spesifik (angka, perbandingan). "
+            "- Narasi WAJIB sinkron dengan visual: jika klip menunjukkan elang menukik, ceritakan tentang kecepatan menukiknya. "
+            "- Gunakan pengetahuanmu untuk menambah fakta menarik yang akurat. "
+            "- Akhiri dengan fakta paling mind-blowing atau pertanyaan retoris."
+        ),
+        "content_type": "narration"
+    },
     "profile": {
         "id": "profile",
-        "name": "Pattern A: Profil / Tokoh",
+        "name": "Profil / Tokoh",
         "icon": "👤",
-        "description": "Memperkenalkan siapa tokoh dalam video, latar belakang, dan daya tariknya.",
-        "example": "Perkenalkan siapa pemilik channel Outdoor Boys dan kenapa kontennya menarik",
+        "description": "Memperkenalkan siapa tokoh, kreator, atau figur dalam video — latar belakang dan daya tariknya.",
+        "example": "Perkenalkan siapa Outdoor Boys dan kenapa kontennya menarik",
+        "tags": ["profile", "creator", "youtuber", "celebrity", "athlete", "interview", "biography", "who is"],
         "clip_prompt": (
-            "Cari klip yang menampilkan kreator/tokoh utama sedang memperkenalkan diri, "
-            "menunjukkan keahlian, atau momen iconic yang menggambarkan kepribadian mereka. "
-            "Prioritaskan momen close-up wajah, momen emosional, dan aksi khas mereka."
+            "Cari klip yang menampilkan tokoh utama: close-up wajah, momen menunjukkan keahlian, "
+            "momen emosional atau iconic, dan aksi khas mereka. "
+            "Prioritaskan variasi: wajah + aksi + reaksi + pencapaian."
         ),
         "script_prompt": (
             "Buat narasi profil yang menarik tentang tokoh dalam video ini. "
-            "Mulai dengan hook yang memancing rasa penasaran, lalu ceritakan siapa mereka, "
-            "apa yang membuat mereka spesial, dan mengapa penonton harus follow. "
-            "Gunakan gaya storytelling yang engaging. "
-            "Jika kamu kekurangan informasi tentang tokoh ini, gunakan pengetahuanmu "
-            "dari sumber kredibel untuk melengkapi profil."
+            "ATURAN: "
+            "- Hook: pertanyaan retoris atau fakta mengejutkan tentang tokoh. "
+            "- Body: siapa mereka, apa keahlian/keunikan, pencapaian paling impressive. "
+            "- Close: mengapa penonton harus tahu/follow mereka. "
+            "- Jika informasi kurang dari transcript, BOLEH tambahkan dari pengetahuanmu."
         ),
         "content_type": "entertainment"
     },
     "process": {
         "id": "process",
-        "name": "Pattern B: Proses / Restorasi",
+        "name": "Proses / Transformasi",
         "icon": "🔧",
-        "description": "Merangkum proses dari awal (rusak) hingga akhir (selesai) secara cepat.",
-        "example": "Rangkum proses perbaikan ban bocor dari awal sampai selesai",
+        "description": "Video proses, restorasi, before-after, cooking — rangkum transformasi dari awal ke hasil akhir.",
+        "example": "Rangkum proses restorasi mobil tua dari rongsok sampai mengkilap",
+        "tags": ["process", "restoration", "repair", "build", "cooking", "recipe", "before after", "transformation", "diy", "craft"],
         "clip_prompt": (
-            "Cari klip yang menunjukkan alur proses: kondisi awal (rusak/kotor), "
-            "tahap pengerjaan utama, dan hasil akhir (selesai/bersih). "
-            "Ambil momen transisi penting: sebelum vs sesudah. "
-            "Clip harus menunjukkan progres yang jelas."
+            "Cari klip yang menunjukkan alur transformasi: "
+            "1) Kondisi awal (rusak/mentah/kotor), "
+            "2) 2-3 tahap pengerjaan paling dramatic, "
+            "3) Hasil akhir (reveal). "
+            "Pastikan ada kontras visual yang jelas antara sebelum dan sesudah."
         ),
         "script_prompt": (
-            "Buat narasi yang merangkum proses restorasi/perbaikan yang ditunjukkan di video. "
-            "Mulai dengan menyebutkan masalah awal, jelaskan langkah-langkah kunci secara singkat, "
-            "dan akhiri dengan reveal hasil akhir yang memuaskan. "
-            "Gunakan tone yang antusias dan pacing cepat."
+            "Buat narasi proses transformasi yang satisfying. "
+            "ATURAN: "
+            "- Hook: tunjukkan kondisi awal yang 'parah' untuk bikin penasaran. "
+            "- Body: jelaskan langkah kunci secara singkat, fokus pada momen WOW. "
+            "- Reveal: bangun antisipasi sebelum tunjukkan hasil akhir. "
+            "- Tone: antusias, pacing cepat, satisfying."
         ),
         "content_type": "entertainment"
     },
-    "documentary": {
-        "id": "documentary",
-        "name": "Pattern C: Dokumenter / Informasi",
-        "icon": "📚",
-        "description": "Meringkas informasi edukasi berdurasi panjang menjadi poin-poin padat.",
-        "example": "Ringkas video penjelasan tentang bioma tundra menjadi 1-2 menit",
-        "clip_prompt": (
-            "Cari klip yang berisi poin informasi paling penting dan menarik. "
-            "Prioritaskan bagian yang menjelaskan fakta unik, data mengejutkan, "
-            "atau visualisasi yang memperkuat penjelasan. "
-            "Hindari bagian perkenalan/penutup yang generik."
-        ),
-        "script_prompt": (
-            "Buat narasi edukatif yang meringkas informasi utama dari video ini. "
-            "Mulai dengan fakta menarik sebagai hook, lalu sampaikan 3-5 poin utama secara padat. "
-            "Akhiri dengan insight atau fakta mengejutkan. "
-            "Gunakan sumber pengetahuanmu untuk melengkapi informasi yang kurang dari transcript. "
-            "Pastikan informasi akurat dan dari sumber kredibel."
-        ),
-        "content_type": "narration"
-    },
     "listicle": {
         "id": "listicle",
-        "name": "Pattern E: Listicle / Top Poin",
+        "name": "Listicle / Top N",
         "icon": "🏆",
-        "description": "Mengambil 3-5 poin terbaik, terlucu, atau paling penting dari video.",
-        "example": "Ambil 3 momen paling epik dari pertandingan ini",
+        "description": "Video ranking, top 10, best of — ambil 3-7 momen terbaik dengan format countdown.",
+        "example": "Ambil 5 momen paling epik dari pertandingan UFC ini",
+        "tags": ["top", "best", "worst", "ranking", "list", "countdown", "moments", "compilation", "vs", "comparison"],
         "clip_prompt": (
-            "Cari 3-5 momen terbaik/paling menarik dari video ini. "
-            "Perhatikan kata kunci transisi seperti 'pertama', 'yang kedua', 'selanjutnya'. "
-            "Prioritaskan momen dengan reaksi emosional tinggi atau poin climax."
+            "Cari 3-7 momen terbaik/paling impactful dari video ini. "
+            "Prioritaskan: reaksi emosional tinggi, momen climax, visual dramatic. "
+            "Urutkan dari yang bagus ke yang PALING bagus (build suspense)."
         ),
         "script_prompt": (
-            "Buat narasi listicle (format daftar) dari poin-poin terbaik dalam video ini. "
-            "Gunakan format: 'Nomor 3...', 'Nomor 2...', 'Dan yang nomor 1...' "
-            "Bangun suspense dari paling rendah ke paling tinggi. "
-            "Setiap poin harus punya hook mini yang bikin penonton terus nonton."
+            "Buat narasi listicle countdown yang bikin penonton stay sampai akhir. "
+            "ATURAN: "
+            "- Hook: 'Nomor X akan bikin kamu...' (teaser ending). "
+            "- Format: countdown dari nomor besar → nomor 1. "
+            "- Setiap nomor: mini-hook + penjelasan singkat kenapa masuk list. "
+            "- Nomor 1: reveal paling dramatis + reaksi/komentar penutup."
         ),
         "content_type": "entertainment"
     },
     "tutorial": {
         "id": "tutorial",
-        "name": "Pattern F: Tutorial / How-To Kilat",
+        "name": "Tutorial / How-To",
         "icon": "📖",
-        "description": "Memadatkan tutorial panjang menjadi langkah step-by-step 60 detik.",
-        "example": "Buat tutorial singkat cara membuat kue ini dari bahan sampai matang",
+        "description": "Video tutorial atau how-to — padatkan jadi step-by-step singkat yang actionable.",
+        "example": "Buat tutorial 60 detik cara edit foto aesthetic di Lightroom",
+        "tags": ["tutorial", "how to", "guide", "tips", "trick", "learn", "step", "cara", "setup", "install"],
         "clip_prompt": (
-            "Cari klip yang menunjukkan langkah-langkah instruksi inti (aksi). "
-            "Potong bagian perkenalan, basa-basi, dan penjelasan berulang. "
-            "Hanya ambil momen saat instruktur melakukan aksi/demo."
+            "Cari klip yang menunjukkan langkah-langkah instruksi inti (aksi nyata). "
+            "Potong semua basa-basi, sponsor, dan penjelasan berulang. "
+            "Hanya ambil momen demo/aksi yang essential untuk mengikuti tutorial."
         ),
         "script_prompt": (
-            "Buat narasi tutorial singkat step-by-step. "
-            "Format: 'Langkah 1: [aksi]', 'Langkah 2: [aksi]', dst. "
-            "Langsung ke inti tanpa basa-basi. Tone: helpful dan to-the-point. "
-            "Akhiri dengan tips bonus atau catatan penting."
+            "Buat narasi tutorial step-by-step yang ringkas dan actionable. "
+            "ATURAN: "
+            "- Hook: sebut hasil akhir yang akan dicapai. "
+            "- Format: 'Langkah 1: ...', 'Langkah 2: ...', dst. "
+            "- Setiap langkah: 1 kalimat aksi + 1 kalimat tips (jika perlu). "
+            "- Langsung ke inti, tanpa basa-basi. "
+            "- Close: tips bonus atau common mistake yang harus dihindari."
         ),
         "content_type": "tutorial"
     },
     "debunking": {
         "id": "debunking",
-        "name": "Pattern G: Mitos vs Fakta",
+        "name": "Mitos vs Fakta",
         "icon": "🔍",
-        "description": "Mencari bagian di mana kreator membantah kesalahpahaman atau membuktikan sesuatu.",
-        "example": "Fokus pada momen di mana mitos tentang hiu dibantah di dokumenter ini",
+        "description": "Video debunking, myth-busting, atau edukasi yang meluruskan kesalahpahaman.",
+        "example": "Bantah 3 mitos tentang hiu yang bikin orang takut berenang",
+        "tags": ["myth", "fact", "debunk", "truth", "false", "real", "fake", "misconception", "actually", "wrong"],
         "clip_prompt": (
-            "Cari klip yang menunjukkan kontradiksi atau pembuktian. "
-            "Perhatikan kalimat seperti 'banyak yang mengira...', 'faktanya...', "
-            "'sebenarnya...', 'yang benar adalah...'. "
-            "Prioritaskan momen reveal atau twist."
+            "Cari klip yang menunjukkan kontradiksi, pembuktian, atau surprise reveal. "
+            "Perhatikan kalimat: 'banyak yang mengira...', 'faktanya...', 'ternyata...'. "
+            "Prioritaskan momen visual yang membuktikan fakta (eksperimen, bukti, data)."
         ),
         "script_prompt": (
-            "Buat narasi 'Mitos vs Fakta' yang engaging. "
-            "Format: 'Banyak orang mengira [mitos], tapi ternyata [fakta]...' "
-            "Bangun rasa penasaran di awal, berikan fakta mengejutkan. "
-            "Gunakan pengetahuanmu dari sumber kredibel untuk memastikan fakta akurat."
+            "Buat narasi 'Mitos vs Fakta' yang membuat penonton terkejut. "
+            "ATURAN: "
+            "- Hook: sebut mitos yang dipercaya banyak orang. "
+            "- Format per mitos: 'MITOS: [kepercayaan umum] → FAKTA: [kebenaran]'. "
+            "- Setiap fakta harus didukung data/angka spesifik. "
+            "- Gunakan pengetahuanmu untuk memastikan fakta akurat."
         ),
         "content_type": "narration"
     },
     "highlight": {
         "id": "highlight",
-        "name": "Pattern H: Highlight / Hook",
+        "name": "Highlight / Teaser",
         "icon": "🎬",
-        "description": "Membuat trailer/teaser memancing rasa penasaran dari podcast/wawancara.",
-        "example": "Ambil 1 menit pernyataan paling kontroversial dari podcast ini",
+        "description": "Podcast, wawancara, vlog — ambil momen paling seru sebagai teaser yang bikin penasaran.",
+        "example": "Ambil pernyataan paling kontroversial dari podcast Deddy Corbuzier",
+        "tags": ["podcast", "interview", "vlog", "reaction", "drama", "controversial", "funny", "emotional", "clip"],
         "clip_prompt": (
-            "Cari momen dengan emosi paling tinggi: pernyataan kontroversial, "
-            "ekspresi terkejut, momen lucu atau dramatic. "
-            "Prioritaskan overlay reaksi dan momen yang memancing komentar."
+            "Cari momen dengan emosi tertinggi: pernyataan kontroversial, "
+            "reaksi terkejut, momen lucu/dramatis, atau reveal mengejutkan. "
+            "Prioritaskan momen yang akan memancing komentar dan share."
         ),
         "script_prompt": (
-            "Buat narasi teaser/trailer yang memancing rasa penasaran. "
-            "Mulai dengan hook provokasi: 'Apa yang dia katakan selanjutnya mengejutkan semua orang...' "
-            "Bangun suspense, jangan kasih semua jawaban. "
-            "Akhiri dengan cliffhanger agar penonton cari video full."
+            "Buat narasi teaser/trailer yang bikin penonton HARUS nonton video full. "
+            "ATURAN: "
+            "- Hook: provokasi atau pertanyaan kontroversial. "
+            "- Body: bangun konteks singkat + tease momen paling seru. "
+            "- Close: cliffhanger — jangan kasih jawaban lengkap. "
+            "- Tone: dramatis, bikin penasaran."
         ),
         "content_type": "entertainment"
     },
     "custom": {
         "id": "custom",
-        "name": "Pattern D: Custom",
+        "name": "Custom (Manual)",
         "icon": "✏️",
-        "description": "Mengikuti instruksi spesifik dari user.",
-        "example": "Tulis konteks dan instruksi sesuai kebutuhanmu",
+        "description": "Kamu yang tentukan sendiri — tulis instruksi sebebas mungkin sesuai kebutuhanmu.",
+        "example": "Tulis konteks dan instruksi detail sesuai kebutuhanmu",
+        "tags": ["custom"],
         "clip_prompt": "",
         "script_prompt": "",
         "content_type": "dubbing"
     }
 }
+
+
+# ─── Clip & Duration Recommendation ────────────────────────────────
+
+def recommend_clips_and_duration(video_duration_seconds: int) -> dict:
+    """Calculate optimal primary clips, spare clips, and target duration
+    based on source video length. Pure logic — no AI needed.
+    
+    Returns:
+        {
+            "primary_clips": int,
+            "spare_clips": int,
+            "target_duration": int,
+            "reason": str,
+            "detail": str,
+        }
+    """
+    dur_min = video_duration_seconds / 60
+    
+    # Average output clip length ~12-18s
+    avg_clip = 15
+    
+    if dur_min <= 5:
+        target, primary, spare = 30, 3, 2
+    elif dur_min <= 10:
+        target, primary, spare = 60, 4, 3
+    elif dur_min <= 20:
+        target, primary, spare = 90, 6, 5
+    elif dur_min <= 30:
+        target, primary, spare = 90, 7, 7
+    elif dur_min <= 45:
+        target, primary, spare = 120, 8, 8
+    elif dur_min <= 60:
+        target, primary, spare = 120, 10, 10
+    elif dur_min <= 90:
+        target, primary, spare = 150, 12, 12
+    else:
+        target, primary, spare = 180, 15, 15
+    
+    total = primary + spare
+    dur_str = (f"{int(dur_min)}m" if dur_min < 60
+               else f"{int(dur_min//60)}h{int(dur_min%60):02d}m")
+    
+    reason = (
+        f"Video {dur_str} → {primary} klip utama + {spare} cadangan, "
+        f"target ~{target} detik"
+    )
+    detail = (
+        f"• {primary} klip utama mengisi durasi ~{target}s "
+        f"(rata-rata ~{avg_clip}s/klip)\n"
+        f"• {spare} klip cadangan sebagai opsi pengganti jika "
+        f"ada klip utama yang kurang bagus\n"
+        f"• Total {total} klip diminta ke AI, durasi output bisa "
+        f"±10% dari target"
+    )
+    
+    return {
+        "primary_clips": primary,
+        "spare_clips": spare,
+        "target_duration": target,
+        "reason": reason,
+        "detail": detail,
+    }
+
+
+# ─── AI Recommendation Helpers ─────────────────────────────────────
+
+def fetch_video_info_light(url: str, config: dict = None) -> dict:
+    """Fetch video title + description without downloading.
+    Returns {"title": ..., "description": ..., "channel": ..., "duration": ...}"""
+    import yt_dlp
+    
+    cookies_path = None
+    if config:
+        cp = config.get("cookies_path", "cookies.txt")
+        if cp and os.path.isfile(cp):
+            cookies_path = cp
+    
+    ydl_opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "skip_download": True,
+        "extract_flat": False,
+    }
+    if cookies_path:
+        ydl_opts["cookiefile"] = cookies_path
+    
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=False)
+    
+    return {
+        "title": info.get("title", ""),
+        "description": (info.get("description") or "")[:500],
+        "channel": info.get("channel", ""),
+        "duration": info.get("duration", 0),
+    }
+
+
+def recommend_pattern_and_context(video_info: dict, config: dict) -> dict:
+    """Use AI to recommend best pattern + context suggestions for a video.
+    
+    Args:
+        video_info: {"title": ..., "description": ..., "channel": ..., "duration": ...}
+        config: App config with ai_providers
+    
+    Returns:
+        {"pattern_id": str, "pattern_reason": str, "contexts": [str, str, ...]}
+    """
+    from script_generator import ScriptGenerator
+    
+    title = video_info.get("title", "Unknown")
+    desc = video_info.get("description", "")
+    channel = video_info.get("channel", "")
+    dur = video_info.get("duration", 0)
+    dur_str = f"{dur // 60}:{dur % 60:02d}" if dur else "?"
+    
+    # Build pattern list for prompt
+    pattern_options = []
+    for pid, p in PATTERNS.items():
+        if pid == "custom":
+            continue
+        pattern_options.append(
+            f'- "{pid}": {p["name"]} — {p["description"]}'
+        )
+    patterns_text = "\n".join(pattern_options)
+    
+    prompt = f"""Analisis video YouTube ini dan rekomendasikan pattern + konteks terbaik untuk membuat short video clip dub.
+
+VIDEO INFO:
+- Judul: {title}
+- Channel: {channel}
+- Durasi: {dur_str}
+- Deskripsi: {desc[:300]}
+
+PATTERN YANG TERSEDIA:
+{patterns_text}
+
+TUGAS:
+1. Pilih 1 pattern yang PALING cocok untuk video ini.
+2. Jelaskan singkat (1-2 kalimat) MENGAPA pattern itu cocok.
+3. Buat 3 konteks/instruksi berbeda yang bisa dipakai user untuk membuat clip dari video ini.
+   - Setiap konteks harus spesifik, actionable, dan sesuai dengan isi video.
+   - Variasikan angle: informatif, emosional, clickbait-friendly.
+
+RESPOND DALAM FORMAT JSON SAJA (tanpa markdown code block):
+{{
+  "pattern_id": "id_pattern",
+  "pattern_reason": "Alasan singkat kenapa pattern ini cocok",
+  "contexts": [
+    "Konteks pertama yang spesifik...",
+    "Konteks kedua dengan angle berbeda...",
+    "Konteks ketiga yang menarik..."
+  ]
+}}"""
+
+    system_msg = (
+        "Kamu adalah AI assistant yang membantu creator membuat short-form content dari video YouTube. "
+        "Kamu ahli dalam memilih strategi konten dan menulis brief yang jelas. "
+        "Selalu respond dalam JSON valid."
+    )
+    
+    sg = ScriptGenerator(config)
+    raw = sg._call_llm(prompt, system_msg)
+    
+    # Parse JSON from response (handle markdown code blocks)
+    import re
+    json_match = re.search(r'\{[\s\S]*\}', raw)
+    if json_match:
+        result = json.loads(json_match.group())
+    else:
+        raise ValueError(f"AI response is not valid JSON: {raw[:200]}")
+    
+    # Validate pattern_id exists
+    if result.get("pattern_id") not in PATTERNS or result.get("pattern_id") == "custom":
+        result["pattern_id"] = "documentary"
+    
+    # Ensure contexts is a list
+    if not isinstance(result.get("contexts"), list):
+        result["contexts"] = [str(result.get("contexts", ""))]
+    
+    return result
+
 
 CONTENT_TYPE_MAP = {
     "dubbing": "DUBBING",
@@ -365,7 +568,9 @@ class ClipDubEngine:
     def _get_duration(self, file_path: str) -> float:
         """Get duration of a media file in seconds using ffprobe."""
         try:
-            ffprobe = self.ffmpeg_path.replace("ffmpeg", "ffprobe")
+            # Build ffprobe path correctly: only replace the filename, not the directory
+            ffprobe_name = "ffprobe.exe" if os.name == "nt" else "ffprobe"
+            ffprobe = os.path.join(os.path.dirname(self.ffmpeg_path), ffprobe_name)
             cmd = [
                 ffprobe, "-v", "error",
                 "-show_entries", "format=duration",
@@ -377,7 +582,9 @@ class ClipDubEngine:
                 creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
             )
             if result.returncode == 0 and result.stdout.strip():
-                return float(result.stdout.strip())
+                dur = float(result.stdout.strip())
+                if dur > 0:
+                    return dur
         except Exception:
             pass
         return 0.0
@@ -475,13 +682,14 @@ class ClipDubEngine:
     # ─── STEP 2: Context-Aware Clipping ───────────────────────────────
     
     def find_context_clips(self, user_context: str, pattern_id: str = "custom",
-                          num_clips: int = 5, target_duration: int = 90,
-                          spare_ratio: float = 1.6, auto_mode: bool = False) -> List[Dict]:
+                          primary_clips: int = 7, spare_clips: int = 5,
+                          target_duration: int = 90) -> List[Dict]:
         """
         Find clips relevant to the user's context/pattern.
         
-        auto_mode: jika True, AI menentukan jumlah clip optimal sendiri.
-                   num_clips diabaikan, AI memilih berdasarkan konteks.
+        primary_clips: jumlah klip utama yang akan dipakai.
+        spare_clips: jumlah klip cadangan untuk opsi pengganti.
+        target_duration: estimasi durasi output (fleksibel ±10%).
         
         Returns: primary clips list. Spare clips stored in self.spare_highlights.
         Requires subtitle.
@@ -508,6 +716,9 @@ class ClipDubEngine:
         self.log("[STEP 2/6] 🔍 Finding context-aware clips...")
         self.emit_step(2, "Cari Klip", "Parsing subtitle & analisis AI...")
         self.set_progress("Finding relevant clips...", 0.15)
+        
+        # Store target duration for downstream use (assemble_draft trimming)
+        self.config["_target_duration"] = target_duration
         
         # Get pattern config
         pattern = PATTERNS.get(pattern_id, PATTERNS["custom"])
@@ -543,16 +754,9 @@ class ClipDubEngine:
         if not self.transcript or len(self.transcript.strip()) < 50:
             raise Exception("Transcript terlalu pendek atau kosong. Video mungkin tidak punya narasi.")
         
-        # Auto mode: AI tentukan jumlah optimal, minta lebih banyak
-        if auto_mode:
-            # Minta AI 12-15 clip, nanti filter yang terbaik
-            total_requested = 15
-            effective_num_clips = 0  # akan ditentukan dari hasil AI
-            self.log(f"  🤖 Mode AUTO: AI akan menentukan jumlah clip optimal (target {target_duration}s)")
-        else:
-            # Request 2x+ more than needed — AI may return fewer, and some get filtered
-            total_requested = max(num_clips * 2 + 5, int(num_clips * spare_ratio))
-            effective_num_clips = num_clips
+        # Request primary + spare + buffer from AI
+        total_requested = primary_clips + spare_clips + 5
+        self.log(f"  📊 Requesting {total_requested} clips ({primary_clips} utama + {spare_clips} cadangan)")
         
         # Build context-aware system prompt (judul video diinjeksi untuk akurasi lebih baik)
         video_title = self.video_info.get("title", "") if self.video_info else ""
@@ -560,7 +764,7 @@ class ClipDubEngine:
             self.log(f"  📺 Judul video digunakan sebagai konteks tambahan: \"{video_title}\"")
         
         context_prompt = self._build_context_clip_prompt(
-            user_context, pattern, total_requested, target_duration, auto_mode=auto_mode
+            user_context, pattern, total_requested, target_duration
         )
         
         # Override system prompt temporarily
@@ -574,6 +778,20 @@ class ClipDubEngine:
                                             min_duration=10, max_duration=50,
                                             force_system_prompt=True)
         
+        # If not enough clips, retry with relaxed duration filter
+        if len(highlights) < primary_clips:
+            self.log(f"  ⚠ Only {len(highlights)} clips in 10-50s range, retrying with wider range...")
+            core.system_prompt = context_prompt
+            highlights_wider = core.find_highlights(self.transcript, self.video_info, total_requested,
+                                                      min_duration=8, max_duration=70,
+                                                      force_system_prompt=True)
+            # Merge: keep originals + add new unique ones
+            existing_starts = {h.get("start_time") for h in highlights}
+            for h in highlights_wider:
+                if h.get("start_time") not in existing_starts:
+                    highlights.append(h)
+                    existing_starts.add(h.get("start_time"))
+        
         # Restore
         core.system_prompt = original_prompt
         
@@ -584,28 +802,9 @@ class ClipDubEngine:
         self.set_progress("Analyzing frames for visual content...", 0.30)
         highlights = self._score_and_filter_clips(highlights)
         
-        # Auto mode: pilih clip terbaik yang memenuhi target durasi
-        if auto_mode:
-            # Hitung total durasi, pilih clip sampai target terpenuhi
-            selected = []
-            total_dur = 0
-            max_dur = target_duration * 1.2  # toleransi 20% lebih
-            for h in highlights:
-                clip_dur = h.get("duration_seconds", 25)
-                if total_dur + clip_dur <= max_dur:
-                    selected.append(h)
-                    total_dur += clip_dur
-            
-            if not selected:
-                selected = highlights[:5]  # fallback minimal 5
-            
-            effective_num_clips = len(selected)
-            self.highlights = selected
-            self.spare_highlights = [h for h in highlights if h not in selected]
-            self.log(f"  🤖 AUTO: Dipilih {effective_num_clips} clips (total ~{total_dur:.0f}s dari target {target_duration}s)")
-        else:
-            self.highlights = highlights[:effective_num_clips]
-            self.spare_highlights = highlights[effective_num_clips:]
+        # Split into primary + spare
+        self.highlights = highlights[:primary_clips]
+        self.spare_highlights = highlights[primary_clips:]
         
         primary_count = len(self.highlights)
         spare_count = len(self.spare_highlights)
@@ -755,8 +954,7 @@ class ClipDubEngine:
         return unique
     
     def _build_context_clip_prompt(self, user_context: str, pattern: Dict,
-                                   num_clips: int, target_duration: int,
-                                   auto_mode: bool = False) -> str:
+                                   num_clips: int, target_duration: int) -> str:
         """Build a system prompt for context-aware clip finding."""
         
         pattern_clip_guide = pattern.get("clip_prompt", "")
@@ -790,17 +988,10 @@ class ClipDubEngine:
         else:
             enriched_context = user_context
         
-        # Aturan jumlah clip berbeda untuk auto vs manual
-        if auto_mode:
-            clip_count_rule = f"""1. Tentukan SENDIRI jumlah segment yang optimal untuk memenuhi target durasi ~{target_duration} detik
-   - Pilih sebanyak yang DIBUTUHKAN agar cerita lengkap dan variatif
-   - Setiap clip berdurasi 10-45 detik, VARIASIKAN durasi (jangan seragam)
-   - Total gabungan harus mendekati {target_duration} detik
-   - Lebih baik banyak clip pendek yang variatif daripada sedikit clip panjang yang monoton"""
-        else:
-            clip_count_rule = f"""1. Cari {num_clips} segment yang PALING RELEVAN dengan konteks di atas
-   - Setiap clip berdurasi 10-45 detik (total gabungan target: {target_duration} detik)
-   - VARIASIKAN durasi clip (jangan semua 30 detik)"""
+        clip_count_rule = f"""1. Cari {num_clips} segment yang PALING RELEVAN dengan konteks di atas
+   - Setiap clip berdurasi 10-45 detik (total gabungan target: ~{target_duration} detik)
+   - VARIASIKAN durasi clip (jangan semua 30 detik)
+   - Urutkan berdasarkan RELEVANSI & KUALITAS konten"""
         
         prompt = f"""Kamu adalah AI Video Clipper yang bertugas menemukan segment video yang RELEVAN dengan konteks yang diberikan user.
 
@@ -928,7 +1119,13 @@ PENTING:
             
             h["clip_path"] = str(clip_path)
             self.clip_files[i] = str(clip_path)
-            self.log(f"  ✓ Clip {i+1}: [{start} → {end}] {h['title'][:40]}")
+            
+            # Measure ACTUAL duration (AI estimate may be inaccurate)
+            actual_dur = self._get_duration(str(clip_path))
+            if actual_dur > 0:
+                h["duration_seconds"] = round(actual_dur, 2)
+            
+            self.log(f"  ✓ Clip {i+1}: [{start} → {end}] {actual_dur:.1f}s {h['title'][:40]}")
         
         self.log(f"  ✓ Cut {len(self.clip_files)} clips total")
         self.set_progress("Clips ready for preview", 0.40)
@@ -1102,14 +1299,41 @@ PENTING:
                  (f" ({transition} transition)" if transition != "none" else ""))
         
         # Portrait already applied per-clip
+        self.draft_video_path = str(draft_path)
         if convert_portrait:
-            self.draft_video_path = str(draft_path)
             self.log("  ✓ Per-clip smart portrait crop applied")
-        else:
-            self.draft_video_path = str(landscape_draft)
         
         # Get draft duration
         draft_duration = self._get_duration(self.draft_video_path)
+        
+        # Validate draft duration — if 0, concat likely failed silently
+        if draft_duration <= 0 and highlights:
+            expected_dur = sum(h.get("duration_seconds", 25) for h in highlights)
+            self.log(f"  ⚠ Draft duration=0 (expected ~{expected_dur:.0f}s), retrying with simple concat...")
+            self._concat_simple(portrait_clips, str(draft_path))
+            draft_duration = self._get_duration(self.draft_video_path)
+            if draft_duration <= 0:
+                self.log(f"  ⚠ Duration still 0, using expected duration {expected_dur:.0f}s")
+                draft_duration = expected_dur
+        
+        # Enforce target duration: trim if draft is too long
+        target_dur = self.config.get("_target_duration", 0)
+        if target_dur > 0 and draft_duration > target_dur * 1.1:
+            self.log(f"  ✂️ Draft {draft_duration:.0f}s exceeds target {target_dur}s, trimming...")
+            trimmed_path = self.temp_dir / "draft_trimmed.mp4"
+            cmd = [
+                self.ffmpeg_path, "-y",
+                "-i", self.draft_video_path,
+                "-t", f"{target_dur:.3f}",
+                "-c:v", "copy", "-c:a", "copy",
+                str(trimmed_path)
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True,
+                                   creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+            if result.returncode == 0 and os.path.exists(str(trimmed_path)):
+                self.draft_video_path = str(trimmed_path)
+                draft_duration = self._get_duration(self.draft_video_path)
+                self.log(f"  ✓ Trimmed to {draft_duration:.0f}s")
         
         # Add hook scene di awal video (jika diminta)
         if add_hook and self.highlights:
@@ -1168,18 +1392,20 @@ PENTING:
         
         center_x: normalized horizontal position (0.0=left, 0.5=center, 1.0=right)
         Uses FFmpeg crop filter with calculated x offset.
+        Uses min(crop_w, iw) to handle videos narrower than 9:16.
         """
-        # crop=ih*9/16:ih:x_offset:0
-        # x_offset = (iw - crop_w) * center_x, clamped to valid range
-        # FFmpeg expression: crop=ih*9/16:ih:(iw-ih*9/16)*{center_x}:0
-        x_expr = f"(iw-ih*9/16)*{center_x:.3f}"
-        crop_filter = f"crop=ih*9/16:ih:{x_expr}:0,scale=1080:1920"
+        # crop_w = min(ih*9/16, iw) to handle narrow videos
+        # x_offset clamped to valid range
+        crop_w = "'min(ih*9/16,iw)'"
+        x_expr = f"'max(0,(iw-ih*9/16)*{center_x:.3f})'"
+        crop_filter = f"crop={crop_w}:ih:{x_expr}:0,scale=1080:1920"
         
         cmd = [
             self.ffmpeg_path, "-y",
             "-i", input_path,
             "-vf", crop_filter,
             *self._gpu_args,
+            "-bf", "0",
             "-c:a", "aac",
             str(output_path)
         ]
@@ -1192,11 +1418,13 @@ PENTING:
     
     def _center_crop_portrait(self, input_path: str, output_path: str):
         """Fallback: simple center crop to 9:16."""
+        crop_filter = "crop='min(ih*9/16,iw)':ih,scale=1080:1920"
         cmd = [
             self.ffmpeg_path, "-y",
             "-i", input_path,
-            "-vf", "crop=ih*9/16:ih,scale=1080:1920",
+            "-vf", crop_filter,
             *self._gpu_args,
+            "-bf", "0",
             "-c:a", "aac",
             str(output_path)
         ]
@@ -1204,6 +1432,84 @@ PENTING:
                                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
         if result.returncode != 0:
             raise Exception(f"Portrait crop failed: {result.stderr[-300:]}")
+    
+    def _has_video_stream(self, file_path: str) -> bool:
+        """Check if file has at least one video stream using ffprobe."""
+        try:
+            ffprobe_name = "ffprobe.exe" if os.name == "nt" else "ffprobe"
+            ffprobe = os.path.join(os.path.dirname(self.ffmpeg_path), ffprobe_name)
+            cmd = [
+                ffprobe, "-v", "error",
+                "-select_streams", "v:0",
+                "-show_entries", "stream=codec_type",
+                "-of", "csv=p=0",
+                str(file_path)
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10,
+                                   creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+            return result.returncode == 0 and "video" in result.stdout.strip()
+        except Exception:
+            return False
+
+    def _has_audio_stream(self, file_path: str) -> bool:
+        """Check if file has at least one audio stream."""
+        try:
+            ffprobe_name = "ffprobe.exe" if os.name == "nt" else "ffprobe"
+            ffprobe = os.path.join(os.path.dirname(self.ffmpeg_path), ffprobe_name)
+            cmd = [
+                ffprobe, "-v", "error",
+                "-select_streams", "a:0",
+                "-show_entries", "stream=codec_type",
+                "-of", "csv=p=0",
+                str(file_path)
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10,
+                                   creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+            return result.returncode == 0 and "audio" in (result.stdout or "").strip().lower()
+        except Exception:
+            return False
+
+    def _normalize_clip_for_transition(self, input_path: str, output_path: str):
+        """Normalize clip stream format so xfade chain gets uniform inputs.
+
+        Produces H.264/AAC, 1080x1920, 30fps, yuv420p, stereo 48k.
+        If source has no audio stream, injects silent audio.
+        """
+        has_audio = self._has_audio_stream(input_path)
+
+        base_cmd = [
+            self.ffmpeg_path, "-y",
+            "-threads", "1",
+            "-i", input_path,
+        ]
+
+        if not has_audio:
+            base_cmd.extend([
+                "-f", "lavfi",
+                "-i", "anullsrc=r=48000:cl=stereo",
+            ])
+
+        base_cmd.extend([
+            "-map", "0:v:0",
+            "-map", "0:a:0" if has_audio else "1:a:0",
+            "-vf", "scale=1080:1920:flags=lanczos,fps=30,format=yuv420p",
+            "-c:v", "libx264",
+            "-preset", "veryfast",
+            "-crf", "20",
+            "-pix_fmt", "yuv420p",
+            "-r", "30",
+            "-af", "aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo",
+            "-c:a", "aac",
+            "-ar", "48000",
+            "-ac", "2",
+            "-shortest",
+            output_path,
+        ])
+
+        result = subprocess.run(base_cmd, capture_output=True, text=True,
+                               creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+        if result.returncode != 0:
+            raise Exception(f"Normalize transition clip failed: {result.stderr[-300:]}")
     
     def _crop_clips_to_portrait(self, clip_files: list, highlights: list) -> list:
         """Crop each clip to 9:16 portrait individually with per-clip object detection.
@@ -1244,6 +1550,22 @@ PENTING:
             portrait_path = portrait_dir / f"portrait_{i:03d}.mp4"
             crop_x = 0.5  # Default center
             use_tracking = False  # Whether to use per-frame tracking
+            manual_crop = highlights[i].get("manual_crop") if i < len(highlights) else None
+
+            # 1) Manual crop from Portrait Studio has highest priority
+            if manual_crop and manual_crop.get("enabled", True):
+                try:
+                    self.log(f"    🧭 Clip {i+1}/{total}: applying manual portrait crop")
+                    self._manual_crop_portrait_cv2(
+                        str(clip_path),
+                        str(portrait_path),
+                        manual_crop
+                    )
+                    if os.path.exists(str(portrait_path)) and self._has_video_stream(str(portrait_path)):
+                        portrait_clips.append(portrait_path)
+                        continue
+                except Exception as e:
+                    self.log(f"    ⚠ Manual crop failed clip {i+1}, fallback ke auto: {e}")
             
             # Analyze subject position across frames
             if use_analyzer:
@@ -1273,25 +1595,155 @@ PENTING:
                 except Exception:
                     crop_x = 0.5
             
-            if use_tracking:
-                # Use clipper_core's per-frame tracking (face/body detection + smoothing)
-                try:
-                    self._tracking_crop_portrait(str(clip_path), str(portrait_path))
-                except Exception as e:
-                    self.log(f"    ⚠ Frame tracking failed, using static crop: {e}")
+            try:
+                if use_tracking:
+                    # Use clipper_core's per-frame tracking (face/body detection + smoothing)
+                    try:
+                        self._tracking_crop_portrait(str(clip_path), str(portrait_path))
+                    except Exception as e:
+                        self.log(f"    ⚠ Frame tracking failed, using static crop: {e}")
+                        self._smart_crop_portrait(str(clip_path), str(portrait_path), crop_x)
+                else:
+                    position = "center" if abs(crop_x - 0.5) < 0.05 else f"x={crop_x:.2f}"
+                    self.log(f"    📐 Clip {i+1}/{total}: crop at {position}")
                     self._smart_crop_portrait(str(clip_path), str(portrait_path), crop_x)
-            else:
-                position = "center" if abs(crop_x - 0.5) < 0.05 else f"x={crop_x:.2f}"
-                self.log(f"    📐 Clip {i+1}/{total}: crop at {position}")
-                self._smart_crop_portrait(str(clip_path), str(portrait_path), crop_x)
+            except Exception as e:
+                self.log(f"    ⚠ Portrait crop failed clip {i+1}, using landscape: {e}")
             
-            if os.path.exists(str(portrait_path)):
+            # Validate output: must exist AND have video stream
+            if os.path.exists(str(portrait_path)) and self._has_video_stream(str(portrait_path)):
                 portrait_clips.append(portrait_path)
             else:
                 # Fallback: use original (landscape)
+                self.log(f"    ↩ Clip {i+1}: fallback to landscape")
                 portrait_clips.append(clip_path)
         
         return portrait_clips
+
+    @staticmethod
+    def _interpolate_manual_center_x(t_sec: float, base_center_x: float, keyframes: list) -> float:
+        """Interpolate center_x at time t using linear interpolation over keyframes."""
+        cx = max(0.1, min(0.9, float(base_center_x)))
+        if not keyframes:
+            return cx
+
+        points = []
+        for k in keyframes:
+            try:
+                points.append((float(k.get("t", 0.0)), float(k.get("x", cx))))
+            except Exception:
+                continue
+        if not points:
+            return cx
+
+        points.sort(key=lambda p: p[0])
+        if t_sec <= points[0][0]:
+            return max(0.1, min(0.9, points[0][1]))
+        if t_sec >= points[-1][0]:
+            return max(0.1, min(0.9, points[-1][1]))
+
+        for i in range(len(points) - 1):
+            t1, x1 = points[i]
+            t2, x2 = points[i + 1]
+            if t1 <= t_sec <= t2 and t2 > t1:
+                a = (t_sec - t1) / (t2 - t1)
+                return max(0.1, min(0.9, x1 + (x2 - x1) * a))
+
+        return cx
+
+    def _manual_crop_portrait_cv2(self, input_path: str, output_path: str, manual_crop: dict):
+        """Render manual portrait crop frame-by-frame based on user-set center/keyframes.
+
+        Produces stable 1080x1920 output and remuxes original clip audio.
+        """
+        import cv2
+
+        base_center_x = float(manual_crop.get("base_center_x", 0.5))
+        keyframes = list(manual_crop.get("keyframes", []))
+
+        cap = cv2.VideoCapture(input_path, cv2.CAP_FFMPEG)
+        if not cap.isOpened():
+            raise Exception("Failed to open input clip for manual crop")
+
+        cap.set(cv2.CAP_PROP_N_THREADS, 1)
+        fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+
+        ret, frame = cap.read()
+        if not ret:
+            cap.release()
+            raise Exception("Cannot read first frame for manual crop")
+
+        h, w = frame.shape[:2]
+        crop_w = min(int(h * 9 / 16), w)
+        crop_w = max(2, crop_w)
+
+        # Silent intermediate file (video only), then remux audio.
+        tmp_silent = str(Path(output_path).with_suffix(".silent.mp4"))
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        writer = cv2.VideoWriter(tmp_silent, fourcc, fps, (1080, 1920))
+        if not writer.isOpened():
+            cap.release()
+            raise Exception("Failed to create temp writer for manual crop")
+
+        frame_idx = 0
+        while ret:
+            t_sec = frame_idx / fps if fps > 0 else 0.0
+            cx = self._interpolate_manual_center_x(t_sec, base_center_x, keyframes)
+            center_px = int(cx * w)
+
+            x1 = max(0, min(center_px - (crop_w // 2), w - crop_w))
+            x2 = x1 + crop_w
+
+            crop = frame[:, x1:x2]
+            if crop.size == 0:
+                crop = frame[:, max(0, (w // 2) - (crop_w // 2)):max(0, (w // 2) - (crop_w // 2)) + crop_w]
+
+            out_frame = cv2.resize(crop, (1080, 1920), interpolation=cv2.INTER_LANCZOS4)
+            writer.write(out_frame)
+
+            ret, frame = cap.read()
+            frame_idx += 1
+
+            if self.is_cancelled():
+                break
+
+        writer.release()
+        cap.release()
+
+        if not os.path.exists(tmp_silent):
+            raise Exception("Manual crop temp output missing")
+
+        # Remux source audio if available; if not, keep silent result.
+        cmd = [
+            self.ffmpeg_path, "-y",
+            "-i", tmp_silent,
+            "-i", input_path,
+            "-map", "0:v:0",
+            "-map", "1:a:0?",
+            "-c:v", "copy",
+            "-c:a", "aac",
+            "-shortest",
+            output_path,
+        ]
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+
+        if result.returncode != 0:
+            # Fallback: keep silent cropped clip
+            os.replace(tmp_silent, output_path)
+        else:
+            try:
+                os.remove(tmp_silent)
+            except Exception:
+                pass
+
+        if total_frames > 0:
+            self.log(f"    🧭 Manual crop rendered: {frame_idx}/{total_frames} frames")
     
     def _check_subject_spread(self, analyzer, clip_path: str, duration: float) -> float:
         """Check how much the subject moves across a clip.
@@ -1363,19 +1815,29 @@ PENTING:
         core.convert_to_portrait(input_path, output_path)
     
     def _concat_simple(self, clip_files: list, output_path: str):
-        """Simple concat menggunakan concat demuxer + threads 1 untuk hindari async_lock bug."""
+        """Simple concat menggunakan concat demuxer + threads 1 untuk hindari async_lock bug.
+        
+        Uses -fflags +genpts to regenerate PTS from concat demuxer,
+        -bf 0 to avoid B-frame DTS/PTS reordering issues that cause frozen initial frames,
+        and -movflags +faststart for better playback compatibility.
+        """
         concat_file = self.temp_dir / "concat_list.txt"
         with open(concat_file, "w", encoding="utf-8") as f:
             for cp in clip_files:
-                f.write(f"file '{cp}'\n")
+                # Use forward slashes for FFmpeg concat demuxer compatibility on Windows
+                safe_path = str(cp).replace(chr(92), '/')
+                f.write(f"file '{safe_path}'\n")
         
         cmd = [
             self.ffmpeg_path, "-y",
             "-threads", "1",
+            "-fflags", "+genpts",
             "-f", "concat", "-safe", "0",
             "-i", str(concat_file),
             *self._gpu_args,
+            "-bf", "0",
             "-c:a", "aac",
+            "-movflags", "+faststart",
             "-threads", "1",
             output_path
         ]
@@ -1395,11 +1857,35 @@ PENTING:
         if len(clip_files) < 2:
             return self._concat_simple(clip_files, output_path)
         
+        # Normalize all clips first so xfade receives uniform stream parameters.
+        # This significantly reduces random filter_complex failures.
+        normalized_dir = self.temp_dir / "clips_transition_norm"
+        normalized_dir.mkdir(exist_ok=True)
+
+        normalized_clips = []
+        for i, cp in enumerate(clip_files):
+            norm_path = normalized_dir / f"norm_{i:03d}.mp4"
+            try:
+                self._normalize_clip_for_transition(str(cp), str(norm_path))
+                if os.path.exists(str(norm_path)) and self._has_video_stream(str(norm_path)):
+                    normalized_clips.append(norm_path)
+                else:
+                    self.log(f"  ⚠ Normalized clip invalid, fallback to simple concat")
+                    return self._concat_simple(clip_files, output_path)
+            except Exception as e:
+                self.log(f"  ⚠ Normalize clip gagal ({i+1}/{len(clip_files)}): {e}")
+                return self._concat_simple(clip_files, output_path)
+
         # Dapatkan durasi setiap clip
         clip_durations = []
-        for cp in clip_files:
+        for cp in normalized_clips:
             dur = self._get_duration(str(cp))
             clip_durations.append(dur)
+        
+        # If any clip has 0 duration, xfade offsets will be wrong → fall back to simple concat
+        if any(d <= 0 for d in clip_durations):
+            self.log(f"  ⚠ Some clips have 0 duration, falling back to simple concat")
+            return self._concat_simple(clip_files, output_path)
         
         # Map transition name
         xfade_map = {
@@ -1414,7 +1900,7 @@ PENTING:
         
         # Build input args
         input_args = []
-        for cp in clip_files:
+        for cp in normalized_clips:
             input_args.extend(["-i", str(cp)])
         
         # Build xfade filter chain
@@ -1455,8 +1941,15 @@ PENTING:
             *input_args,
             "-filter_complex", filter_complex,
             "-map", "[vout]", "-map", "[aout]",
-            *self._gpu_args,
+            "-c:v", "libx264",
+            "-preset", "veryfast",
+            "-crf", "20",
+            "-pix_fmt", "yuv420p",
+            "-r", "30",
             "-c:a", "aac",
+            "-ar", "48000",
+            "-ac", "2",
+            "-movflags", "+faststart",
             "-threads", "1",
             output_path
         ]
@@ -1557,10 +2050,14 @@ PENTING:
                 f"x=(w-text_w)/2:y={y_pos}"
             )
         
-        vf = (f"trim=0:0.04,loop=loop=-1:size=1:start=0,"
+        # Calculate loop count: enough frames for hook duration + buffer
+        loop_count = int(hook_duration * fps) + 10
+        
+        vf = (f"trim=start=0:end=0.08,setpts=PTS-STARTPTS,"
+              f"loop=loop={loop_count}:size=1:start=0,"
               f"setpts=N/{fps}/TB,"
               f"{','.join(drawtext_filters)},"
-              f"trim=0:{hook_duration},setpts=PTS-STARTPTS")
+              f"trim=start=0:end={hook_duration},setpts=PTS-STARTPTS")
         
         cmd = [
             self.ffmpeg_path, "-y",
@@ -1590,8 +2087,9 @@ PENTING:
                 "-i", video_path,
                 "-i", hook_audio,
                 "-filter_complex",
-                f"[0:v]trim=0:0.04,loop=loop=-1:size=1:start=0,setpts=N/{fps}/TB,"
-                f"trim=0:{hook_duration},setpts=PTS-STARTPTS[v];"
+                f"[0:v]trim=start=0:end=0.08,setpts=PTS-STARTPTS,"
+                f"loop=loop={loop_count}:size=1:start=0,setpts=N/{fps}/TB,"
+                f"trim=start=0:end={hook_duration},setpts=PTS-STARTPTS[v];"
                 f"[1:a]aresample=44100,apad=whole_dur={hook_duration}[a]",
                 "-map", "[v]", "-map", "[a]",
                 *self._gpu_args,
@@ -1604,6 +2102,21 @@ PENTING:
                                     creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
             if result2.returncode != 0:
                 self.log(f"  ⚠ Hook completely failed, skipping")
+                return 0.0
+        
+        # Validate hook video has a video stream (not just audio)
+        if os.path.exists(hook_video):
+            probe_cmd = [
+                os.path.join(os.path.dirname(self.ffmpeg_path),
+                             "ffprobe.exe" if os.name == "nt" else "ffprobe"),
+                "-v", "error", "-select_streams", "v",
+                "-show_entries", "stream=codec_type",
+                "-of", "csv=p=0", hook_video
+            ]
+            probe_r = subprocess.run(probe_cmd, capture_output=True, text=True, timeout=10,
+                                     creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+            if "video" not in probe_r.stdout:
+                self.log(f"  ⚠ Hook scene has no video stream, skipping hook")
                 return 0.0
         
         # Concat hook + main video
@@ -1649,17 +2162,6 @@ PENTING:
         
         self.log(f"  ✓ Hook scene ditambahkan ({hook_duration:.1f}s)")
         return hook_duration
-        """Get video duration using ffprobe."""
-        ffprobe = os.path.join(os.path.dirname(self.ffmpeg_path), 
-                               "ffprobe.exe" if os.name == "nt" else "ffprobe")
-        cmd = [ffprobe, "-v", "quiet", "-show_entries", "format=duration",
-               "-of", "default=noprint_wrappers=1:nokey=1", video_path]
-        result = subprocess.run(cmd, capture_output=True, text=True,
-                               creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
-        try:
-            return float(result.stdout.strip())
-        except ValueError:
-            return 60.0
     
     # ─── STEP 4: Generate Script ──────────────────────────────────────
     
@@ -1682,6 +2184,10 @@ PENTING:
         
         # Get draft duration
         draft_duration = self._get_duration(self.draft_video_path) if self.draft_video_path else 90
+        
+        # Fallback: if draft reports 0, compute from highlight durations
+        if draft_duration <= 0 and self.highlights:
+            draft_duration = sum(h.get("duration_seconds", 25) for h in self.highlights)
         
         # Build script prompt with rich timestamp context per clip
         clip_descriptions = ""
@@ -1711,14 +2217,25 @@ PENTING:
         # Build exact timing map from clips for segment enforcement
         segment_timing_guide = ""
         if self.highlights and running_time > 0:
-            segment_timing_guide = "\n⏱️ TIMING WAJIB PER-SEGMENT (harus diikuti PERSIS):\n"
+            segment_timing_guide = "\n⏱️ TIMING DAN JUMLAH KATA WAJIB PER-SEGMENT:\n"
             rt = 0.0
             for i, h in enumerate(self.highlights, 1):
                 cd = h.get("duration_seconds", 25)
-                segment_timing_guide += f"  Segment {i}: target_start={rt:.1f}, target_end={rt + cd:.1f} (durasi {cd:.0f}s)\n"
+                # 2.5 words/second target = ensure narration fills 80-95% of clip
+                min_words = max(5, int(cd * 2.0))
+                max_words = int(cd * 2.8)
+                segment_timing_guide += (
+                    f"  Segment {i}: start={rt:.1f}s, end={rt + cd:.1f}s, "
+                    f"durasi={cd:.0f}s → TULIS {min_words}-{max_words} KATA\n"
+                )
                 rt += cd
             segment_timing_guide += f"\n  TOTAL DURASI: {rt:.1f}s (harus = {draft_duration:.0f}s)\n"
             segment_timing_guide += "  JUMLAH SEGMENT HARUS SAMA DENGAN JUMLAH KLIP!\n"
+            segment_timing_guide += (
+                "\n  ⚠️ PERINGATAN: Jika narasi terlalu pendek, akan ada KEKOSONGAN suara!\n"
+                "  Pastikan setiap segment narasi MENGISI durasi klip secara penuh.\n"
+                "  Lebih baik sedikit kebanyakan kata daripada kekurangan.\n"
+            )
         
         prompt = f"""Kamu adalah AI Script Writer profesional untuk YouTube Shorts (Bahasa Indonesia).
 
@@ -1749,7 +2266,7 @@ TUGAS:
 3. BUAT TEPAT {len(self.highlights) if self.highlights else 1} SEGMENT — satu segment per klip video
    - Gunakan timing WAJIB di atas sebagai target_start dan target_end
    - Segment 1 = narasi untuk Clip 1, Segment 2 = narasi untuk Clip 2, dst
-   - Narasi setiap segment harus SESUAI dengan durasi klip (jangan terlalu panjang/pendek)
+   - Narasi setiap segment harus MENGISI PENUH durasi klip — JANGAN terlalu pendek!
 4. Narasi HARUS mendeskripsikan apa yang TERLIHAT di layar (lihat field 👁️ Visual)
    - Jika visual menunjukkan elang terbang → narasi harus tentang elang terbang
    - Jika visual menunjukkan grafik → narasi harus menjelaskan data di grafik
@@ -1759,12 +2276,18 @@ TUGAS:
 7. Jika ada informasi penting yang kurang dari transcript, 
    BOLEH gunakan pengetahuanmu dari sumber kredibel untuk melengkapi
 
-ATURAN DURASI TEKS (PENTING):
-- Kecepatan bicara: ~2.5 kata/detik (150 kata/menit)
-- Segment berdurasi 20s → tulis ~50 kata
-- Segment berdurasi 30s → tulis ~75 kata
-- Segment berdurasi 40s → tulis ~100 kata
-- JANGAN tulis terlalu panjang! Lebih baik sedikit pendek daripada narasi dipercepat
+ATURAN JUMLAH KATA PER SEGMENT (KRITIS — HARUS DIPATUHI):
+- Kecepatan bicara TTS: ~2.5 kata/detik
+- RUMUS: Segment berdurasi X detik → tulis MINIMAL (X × 2) kata, MAKSIMAL (X × 2.8) kata
+- Contoh:
+  * Segment 10s → tulis 20-28 kata (BUKAN 5-10 kata!)
+  * Segment 15s → tulis 30-42 kata
+  * Segment 20s → tulis 40-56 kata
+  * Segment 30s → tulis 60-84 kata
+- JIKA NARASI TERLALU PENDEK, AKAN ADA KEHENINGAN PANJANG TANPA SUARA!
+- Pastikan narasi CUKUP PANJANG untuk mengisi durasi klip
+- Lebih baik sedikit lebih banyak dari target daripada kekurangan
+- Lihat kolom "TULIS X-Y KATA" di timing guide di atas dan PATUHI
 
 OUTPUT FORMAT (WAJIB JSON):
 {{
@@ -1884,8 +2407,103 @@ HANYA OUTPUT JSON YANG VALID."""
         if segments and draft_duration > 0:
             segments[-1]["target_end"] = round(min(segments[-1]["target_end"], draft_duration), 1)
         
+        # Post-validate: check word count vs segment duration
+        short_segments = []
+        for i, seg in enumerate(segments):
+            seg_dur = seg.get("target_end", 0) - seg.get("target_start", 0)
+            word_count = len(seg.get("text", "").split())
+            min_words = max(5, int(seg_dur * 1.8))  # minimum ~1.8 words/sec
+            if word_count < min_words and seg_dur > 3:
+                short_segments.append((i + 1, word_count, min_words, seg_dur))
+        
+        if short_segments:
+            self.log(f"  ⚠️ {len(short_segments)} segment(s) terlalu pendek untuk durasinya:")
+            for seg_num, wc, min_w, sd in short_segments:
+                self.log(f"    Seg {seg_num}: {wc} kata untuk {sd:.0f}s (minimum {min_w} kata)")
+            self.log(f"  ⚠️ Ini bisa menyebabkan keheningan di tengah video!")
+            self.log(f"  💡 Akan dilakukan auto-extend narasi untuk mengisi kekosongan...")
+            
+            # Auto-extend short segments by padding with contextual filler
+            self._extend_short_segments(segments)
+        
         self.script_data["segments"] = segments
+        # Rebuild full_script from segments to keep in sync
+        self.script_data["full_script"] = " ".join(
+            seg.get("text", "") for seg in segments if seg.get("text")
+        )
+        self.script_data["word_count"] = len(self.script_data["full_script"].split())
         self.script_data["estimated_duration"] = round(draft_duration, 1)
+    
+    def _extend_short_segments(self, segments: list):
+        """Extend narration text for segments that are too short for their duration.
+        Uses AI to generate additional text that fits the context."""
+        
+        short_segs = []
+        for i, seg in enumerate(segments):
+            seg_dur = seg.get("target_end", 0) - seg.get("target_start", 0)
+            word_count = len(seg.get("text", "").split())
+            target_words = int(seg_dur * 2.2)  # aim for 2.2 words/sec
+            if word_count < int(seg_dur * 1.8) and seg_dur > 3:
+                short_segs.append({
+                    "index": i,
+                    "current_text": seg.get("text", ""),
+                    "current_words": word_count,
+                    "target_words": target_words,
+                    "duration": seg_dur,
+                })
+        
+        if not short_segs:
+            return
+        
+        # Build prompt explaining what needs extending
+        extend_list = ""
+        for s in short_segs:
+            extend_list += (
+                f"\nSegment {s['index']+1} (durasi {s['duration']:.0f}s, "
+                f"saat ini {s['current_words']} kata, TARGET {s['target_words']} kata):\n"
+                f"  Teks saat ini: \"{s['current_text']}\"\n"
+            )
+        
+        video_title = self.video_info.get("title", "") if self.video_info else ""
+        
+        prompt = f"""Beberapa segment narasi terlalu PENDEK dan akan menyebabkan keheningan di video.
+Perpanjang setiap segment agar MENGISI durasi klip secara penuh.
+
+VIDEO: {video_title}
+
+SEGMENT YANG PERLU DIPERPANJANG:
+{extend_list}
+
+TUGAS:
+- Perpanjang teks setiap segment hingga mencapai TARGET jumlah kata
+- JANGAN ubah makna atau topik — tambahkan detail, fakta, atau elaborasi
+- Pertahankan tone dan gaya bahasa yang sama
+- Output HANYA JSON array dengan format: [{{"index": 0, "text": "teks lengkap yang sudah diperpanjang..."}}]
+- JANGAN sertakan markdown code block"""
+
+        try:
+            from script_generator import ScriptGenerator
+            gen = ScriptGenerator(self.config)
+            system_msg = "Kamu adalah script writer. Perpanjang narasi agar mengisi durasi. Output JSON valid saja."
+            raw = gen._call_llm(prompt, system_msg)
+            
+            import re
+            json_match = re.search(r'\[[\s\S]*\]', raw)
+            if json_match:
+                extensions = json.loads(json_match.group())
+                for ext in extensions:
+                    idx = ext.get("index", -1)
+                    new_text = ext.get("text", "").strip()
+                    if 0 <= idx < len(segments) and new_text:
+                        old_wc = len(segments[idx].get("text", "").split())
+                        new_wc = len(new_text.split())
+                        if new_wc > old_wc:
+                            segments[idx]["text"] = new_text
+                            self.log(f"    ✓ Seg {idx+1}: {old_wc} → {new_wc} kata")
+                
+                self.log(f"  ✅ Auto-extend selesai")
+        except Exception as e:
+            self.log(f"  ⚠️ Auto-extend gagal: {e}")
     
     # ─── STEP 5: Refine Script ────────────────────────────────────────
     
@@ -1903,6 +2521,8 @@ HANYA OUTPUT JSON YANG VALID."""
         self.set_progress("Refining script...", 0.65)
         
         draft_duration = self._get_duration(self.draft_video_path) if self.draft_video_path else 90
+        if draft_duration <= 0 and self.highlights:
+            draft_duration = sum(h.get("duration_seconds", 25) for h in self.highlights)
         
         prompt = f"""Script narasi saat ini:
 ---
@@ -1972,7 +2592,8 @@ HANYA OUTPUT JSON YANG VALID."""
                     pitch: str = "+0Hz",
                     include_subtitle: bool = True,
                     bgm_url: Optional[str] = None,
-                    bgm_volume: float = 0.15) -> str:
+                    bgm_volume: float = 0.15,
+                    tts_previews: Optional[List[Dict]] = None) -> str:
         """
         Final render: TTS + Mix audio + Burn subtitles.
         Uses tts_sync.py pipeline.
@@ -1990,7 +2611,15 @@ HANYA OUTPUT JSON YANG VALID."""
         
         from tts_sync import TTSVideoSync
         
-        tts_sync = TTSVideoSync(self.config)
+        # For ClipDub: remove original YouTube audio, replace entirely with TTS
+        render_config = dict(self.config)
+        render_config["mix_config"] = {
+            "voice_volume": 1.0,
+            "background_volume": 0.0,
+            "keep_original_audio": False,
+        }
+        
+        tts_sync = TTSVideoSync(render_config)
         
         # Configure voice
         tts_sync.voice = voice
@@ -2000,6 +2629,11 @@ HANYA OUTPUT JSON YANG VALID."""
         # Build timed segments for tts_sync
         segments = script.get("segments", [])
         draft_dur = self._get_duration(self.draft_video_path)
+        
+        # Fallback: if draft_dur is 0, compute from highlight durations
+        if draft_dur <= 0 and self.highlights:
+            draft_dur = sum(h.get("duration_seconds", 25) for h in self.highlights)
+            self.log(f"  ⚠ Draft file reports 0s, using calculated duration: {draft_dur:.0f}s")
         
         if not segments:
             # Fallback: single segment
@@ -2035,8 +2669,7 @@ HANYA OUTPUT JSON YANG VALID."""
             wc = len(seg['text'].split())
             self.log(f"    Seg {i}: [{seg['start']:.1f}s → {seg['end']:.1f}s] ({wc} words) \"{seg['text'][:50]}...\"")
         
-        # Get draft duration
-        draft_duration = self._get_duration(self.draft_video_path)
+        draft_duration = draft_dur  # Reuse already-computed duration
         
         # Output path
         final_output = self.session_dir / "clips" / "final_clipdub.mp4"
@@ -2057,8 +2690,14 @@ HANYA OUTPUT JSON YANG VALID."""
             include_subtitle=include_subtitle,
             bgm_url=bgm_url,
             bgm_volume=bgm_volume,
-            progress_callback=render_progress
+            progress_callback=render_progress,
+            pregenerated_tts=tts_previews
         )
+        
+        # Check if pipeline succeeded
+        if not result.get("success", False) or not os.path.exists(str(final_output)):
+            error_msg = result.get("error", "Unknown render error")
+            raise Exception(f"Render gagal: {error_msg}")
         
         self.final_output = str(final_output)
         self._finish_step_timer(6)
@@ -2075,6 +2714,82 @@ HANYA OUTPUT JSON YANG VALID."""
         self._save_session()
         
         return self.final_output
+    
+    # ─── TTS Preview Generation ───────────────────────────────────────
+    
+    def generate_tts_previews(self, script_data: Dict,
+                              voice: str = "id-ID-ArdiNeural",
+                              speed: str = "+0%",
+                              pitch: str = "+0Hz",
+                              progress_callback=None) -> List[Dict]:
+        """Generate TTS audio preview for each segment.
+        
+        Returns list of dicts with audio_path, tts_duration, word_timings per segment.
+        """
+        segments = script_data.get("segments", [])
+        if not segments:
+            raise Exception("No segments in script data.")
+        
+        self.log("[TTS Preview] Generating TTS for all segments...")
+        
+        from edge_tts_engine import EdgeTTSManager
+        tts = EdgeTTSManager({"voice": voice, "rate": speed, "pitch": pitch})
+        
+        preview_dir = self.session_dir / "_temp" / "tts_preview"
+        preview_dir.mkdir(parents=True, exist_ok=True)
+        
+        results = []
+        total = len(segments)
+        for i, seg in enumerate(segments):
+            text = seg.get("text", "").strip()
+            if not text:
+                continue
+            
+            start = float(seg.get("target_start", 0))
+            end = float(seg.get("target_end", start + 5))
+            
+            if progress_callback:
+                progress_callback(i, total, f"🔊 TTS segment {i+1}/{total}...")
+            
+            output_path = str(preview_dir / f"seg_{i:03d}.mp3")
+            audio_path, duration, word_timings = tts.generate_audio_sync(text, output_path)
+            
+            slot_dur = end - start
+            self.log(f"  Seg {i+1}: TTS={duration:.1f}s / slot={slot_dur:.1f}s")
+            
+            results.append({
+                "index": i,
+                "text": text,
+                "target_start": start,
+                "target_end": end,
+                "audio_path": audio_path,
+                "tts_duration": duration,
+                "word_timings": word_timings or []
+            })
+        
+        self.log(f"[TTS Preview] Generated {len(results)} TTS previews.")
+        return results
+    
+    def generate_single_tts_preview(self, text: str, segment_index: int,
+                                    voice: str = "id-ID-ArdiNeural",
+                                    speed: str = "+0%",
+                                    pitch: str = "+0Hz") -> Dict:
+        """Generate TTS preview for a single segment."""
+        from edge_tts_engine import EdgeTTSManager
+        tts = EdgeTTSManager({"voice": voice, "rate": speed, "pitch": pitch})
+        
+        preview_dir = self.session_dir / "_temp" / "tts_preview"
+        preview_dir.mkdir(parents=True, exist_ok=True)
+        
+        output_path = str(preview_dir / f"seg_{segment_index:03d}.mp3")
+        audio_path, duration, word_timings = tts.generate_audio_sync(text, output_path)
+        
+        self.log(f"  [TTS Regen] Seg {segment_index+1}: {duration:.1f}s")
+        return {
+            "audio_path": audio_path,
+            "tts_duration": duration,
+            "word_timings": word_timings or []
+        }
     
     # ─── Session Management ───────────────────────────────────────────
     
