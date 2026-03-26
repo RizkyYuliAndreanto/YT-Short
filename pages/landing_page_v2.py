@@ -121,12 +121,12 @@ class LandingPage(ctk.CTkFrame):
             ctk.CTkLabel(parent, text="🎬", font=ctk.CTkFont(size=40)).pack(side="left", padx=(0, Spacing.MD))
     
     def _create_cards_grid(self, parent):
-        """Create the 2x2 grid of mode cards"""
-        
+        """Create the 2x3 grid of mode cards"""
+
         # Row 1
         row1 = ctk.CTkFrame(parent, fg_color="transparent")
         row1.pack(pady=(0, Spacing.MD))
-        
+
         # Card 1: YouTube Clipper
         self._create_mode_card(row1,
             icon="✂️",
@@ -137,7 +137,7 @@ class LandingPage(ctk.CTkFrame):
             tooltip="Convert long YouTube videos into short-form content (TikTok, Reels, Shorts)",
             badge=None
         )
-        
+
         # Card 2: AI Dubbing Studio
         self._create_mode_card(row1,
             icon="🎙️",
@@ -146,13 +146,13 @@ class LandingPage(ctk.CTkFrame):
             accent_color=Colors.ACCENT_PRIMARY,  # Electric blue
             command=lambda: self.app.show_page("dubbing_studio"),
             tooltip="Create AI-powered voiceovers using free Edge TTS with Indonesian support",
-            badge="NEW"
+            badge=None
         )
-        
+
         # Row 2
         row2 = ctk.CTkFrame(parent, fg_color="transparent")
-        row2.pack()
-        
+        row2.pack(pady=(0, Spacing.MD))
+
         # Card 3: Clip+Dub Studio
         self._create_mode_card(row2,
             icon="🎬",
@@ -161,18 +161,33 @@ class LandingPage(ctk.CTkFrame):
             accent_color=Colors.ACCENT_SECONDARY,  # Purple
             command=lambda: self.app.show_page("clip_dub"),
             tooltip="Gabungkan clipping + dubbing: input URL → AI pilih momen → script → TTS → Shorts",
-            badge="NEW"
+            badge=None
         )
-        
-        # Card 4: Shopping Video Creator
+
+        # Card 4: Clip Cutter
         self._create_mode_card(row2,
-            icon="🛒",
-            title="Shopping Video",
-            description="Create selling videos for TikTok Shop.\nAI writes persuasive sales scripts.",
-            accent_color=Colors.WARNING,  # Yellow/orange
-            command=lambda: self._show_coming_soon("Shopping Video Creator"),
-            tooltip="Generate product promotion videos for e-commerce platforms",
-            badge="SOON"
+            icon="",
+            title="Clip Cutter",
+            description="Download clips from YouTube, TikTok,\nInstagram, Facebook. Remove watermarks.",
+            accent_color=Colors.INFO,  # Cyan
+            command=lambda: self.app.show_page("clip_cutter"),
+            tooltip="Download video segments from multiple platforms with partial download & watermark removal",
+            badge=None
+        )
+
+        # Row 3
+        row3 = ctk.CTkFrame(parent, fg_color="transparent")
+        row3.pack()
+
+        # Card 5: TTS Maker
+        self._create_mode_card(row3,
+            icon="🔊",
+            title="Text-to-Speech Maker",
+            description="Ubah teks menjadi audio dubbing natural.\nOptimasi suara agar tidak terdeteksi robotik.",
+            accent_color=Colors.SUCCESS,  # Green
+            command=lambda: self.app.show_page("tts_maker"),
+            tooltip="Generate audio dubbing dari teks untuk konten Shorts. Suara natural dengan enhancement.",
+            badge="NEW"
         )
     
     def _create_mode_card(self, parent, icon, title, description, accent_color, 

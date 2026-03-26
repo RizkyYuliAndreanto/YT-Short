@@ -47,6 +47,8 @@ from pages.landing_page_v2 import LandingPage
 from pages.dubbing_studio_page_v2 import DubbingStudioPage
 from pages.youtube_clipper_page import YouTubeClipperPage
 from pages.clip_dub_page import ClipDubPage
+from pages.clip_cutter_page import ClipCutterPage
+from pages.tts_maker_page import TTSMakerPage
 from components.ui_theme import (
     apply_theme_mode,
     enable_auto_tooltips_for_ctk,
@@ -149,6 +151,8 @@ class YTShortClipperApp(ctk.CTk):
         self.create_home_page()
         self.create_dubbing_studio_page()
         self.create_clip_dub_page()
+        self.create_clip_cutter_page()
+        self.create_tts_maker_page()
         self.create_processing_page()
         self.create_clipping_page()
         self.create_highlight_selection_page()
@@ -628,6 +632,14 @@ class YTShortClipperApp(ctk.CTk):
     def create_clip_dub_page(self):
         """Create Clip+Dub Studio page"""
         self.pages["clip_dub"] = ClipDubPage(self.container, self, self.config)
+
+    def create_clip_cutter_page(self):
+        """Create Clip Cutter page"""
+        self.pages["clip_cutter"] = ClipCutterPage(self.container, self, self.config)
+
+    def create_tts_maker_page(self):
+        """Create TTS Maker page"""
+        self.pages["tts_maker"] = TTSMakerPage(self.container, self, self.config)
 
     def load_config(self):
         # Try new AI providers system first (with .env support)
