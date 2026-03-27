@@ -187,6 +187,17 @@ class LandingPage(ctk.CTkFrame):
             accent_color=Colors.SUCCESS,  # Green
             command=lambda: self.app.show_page("tts_maker"),
             tooltip="Generate audio dubbing dari teks untuk konten Shorts. Suara natural dengan enhancement.",
+            badge=None
+        )
+
+        # Card 6: Auto Caption
+        self._create_mode_card(row3,
+            icon="CC",
+            title="Auto Caption",
+            description="Tambahkan subtitle ke video yang sudah ada.\nAudio asli tetap, hanya tambah caption.",
+            accent_color=Colors.WARNING,  # Orange/Yellow
+            command=lambda: self.app.show_page("auto_caption"),
+            tooltip="Extract audio → Transcribe dengan Whisper → Edit script → Burn caption ke video",
             badge="NEW"
         )
     

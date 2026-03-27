@@ -1988,9 +1988,11 @@ FORMAT OUTPUT (JSON array):
                 tts_dur = result.get("total_tts_duration", 0)
                 n_segs = result.get("segments_count", 0)
                 self._update_progress(
-                    100,
-                    f"✅ Done! {n_segs} segments, TTS={tts_dur:.1f}s/{video_duration:.0f}s ({coverage:.0f}% coverage)",
+                    90,
+                    f"✅ Dubbing done! {n_segs} segments, TTS={tts_dur:.1f}s/{video_duration:.0f}s ({coverage:.0f}% coverage)",
                 )
+
+                self._update_progress(100, "✅ Done!")
 
                 self.after(0, lambda: self._on_generation_complete(output_path))
 
