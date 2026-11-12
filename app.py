@@ -50,6 +50,7 @@ from pages.clip_dub_page import ClipDubPage
 from pages.clip_cutter_page import ClipCutterPage
 from pages.tts_maker_page import TTSMakerPage
 from pages.auto_caption_page import AutoCaptionPage
+from pages.documentary_page import DocumentaryPage
 from components.ui_theme import (
     apply_theme_mode,
     enable_auto_tooltips_for_ctk,
@@ -128,6 +129,7 @@ class YTShortClipperApp(ctk.CTk):
         self.subtitle_var = ctk.StringVar(value="id - Indonesian")
         self.clips_var = ctk.StringVar(value="5")
         self.subtitle_loaded = False
+        self.custom_rules = ""
 
         # Load icons for buttons (used by multiple pages)
         try:
@@ -155,6 +157,7 @@ class YTShortClipperApp(ctk.CTk):
         self.create_clip_cutter_page()
         self.create_tts_maker_page()
         self.create_auto_caption_page()
+        self.create_documentary_page()
         self.create_processing_page()
         self.create_clipping_page()
         self.create_highlight_selection_page()
@@ -305,11 +308,18 @@ class YTShortClipperApp(ctk.CTk):
 
         # Reset clips input to default
         self.clips_var.set("5")
+        self.custom_rules = ""
 
         # Reset home page widgets if they exist
         home = self.pages.get("home")
         if home and hasattr(home, "_reset_preview"):
             home._reset_preview()
+        if home and hasattr(home, "rule_mode_var"):
+            home.rule_mode_var.set("free")
+            if hasattr(home, "custom_rules_frame"):
+                home.custom_rules_frame.pack_forget()
+            if hasattr(home, "custom_rules_textbox"):
+                home.custom_rules_textbox.delete("1.0", "end")
         if home and hasattr(home, "subtitle_dropdown"):
             home.subtitle_dropdown.configure(
                 state="disabled", values=["id - Indonesian"]
@@ -646,6 +656,10 @@ class YTShortClipperApp(ctk.CTk):
     def create_auto_caption_page(self):
         """Create Auto Caption page"""
         self.pages["auto_caption"] = AutoCaptionPage(self.container, self, self.config)
+
+    def create_documentary_page(self):
+        """Create Documentary Studio page (Feature 07)"""
+        self.pages["documentary"] = DocumentaryPage(self.container, self, self.config)
 
     def load_config(self):
         # Try new AI providers system first (with .env support)
@@ -1294,6 +1308,7 @@ class YTShortClipperApp(ctk.CTk):
         add_captions,
         add_hook,
         subtitle_lang="id",
+        custom_rules="",
     ):
         try:
             from clipper_core import AutoClipperCore
@@ -1362,7 +1377,8 @@ class YTShortClipperApp(ctk.CTk):
                 core.enable_gpu_acceleration(True)
 
             core.use_heatmap = getattr(self, "use_heatmap", True)
-            core.process(url, num_clips, add_captions=add_captions, add_hook=add_hook)
+            rules_to_pass = custom_rules or getattr(self, "custom_rules", "")
+            core.process(url, num_clips, add_captions=add_captions, add_hook=add_hook, custom_rules=rules_to_pass)
             if not self.cancelled:
                 self.after(0, self.on_complete)
         except Exception as e:
@@ -1488,7 +1504,8 @@ class YTShortClipperApp(ctk.CTk):
 
             # Call find_highlights_only (returns session data)
             core.use_heatmap = getattr(self, "use_heatmap", True)
-            result = core.find_highlights_only(url, num_clips)
+            rules_to_pass = getattr(self, "custom_rules", "")
+            result = core.find_highlights_only(url, num_clips, custom_rules=rules_to_pass)
 
             if not self.cancelled and result:
                 # Store session data for later processing

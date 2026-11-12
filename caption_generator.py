@@ -218,6 +218,31 @@ class CaptionGenerator:
                     seg.is_hook = is_first_segment
                     expanded.append(seg)
 
+        # CRITICAL: Sanitize timing to prevent ANY overlap between segments
+        # Sort by start time first to ensure proper order
+        expanded.sort(key=lambda s: s.start)
+        
+        for i in range(len(expanded) - 1):
+            current = expanded[i]
+            next_seg = expanded[i + 1]
+            
+            # If current segment ends at or after next segment starts
+            if current.end >= next_seg.start:
+                # Calculate gap needed (minimum 10ms to prevent visual overlap)
+                gap = 0.01  # 10ms gap
+                
+                # Shrink current segment to end before next starts
+                new_end = next_seg.start - gap
+                
+                # But ensure current segment has minimum duration (100ms)
+                min_duration = 0.1
+                if new_end - current.start < min_duration:
+                    # If shrinking too much, also push next segment start
+                    new_end = current.start + min_duration
+                    next_seg.start = new_end + gap
+                
+                current.end = round(new_end, 3)
+
         return expanded
 
     def _expand_word_by_word(self, seg: CaptionSegment, is_hook: bool = False) -> List[CaptionSegment]:
@@ -268,8 +293,10 @@ class CaptionGenerator:
         - \\kf<centiseconds> = smooth fill effect for each word
         - Words highlight progressively from left to right
 
-        IMPORTANT: Duration is calculated as time until NEXT word starts (not word end)
-        This ensures total karaoke time matches segment duration exactly.
+        TIMING STRATEGY:
+        - Use EXACT word timings from Whisper (millisecond precision)
+        - Segment starts at first word start, ends at last word end
+        - NO extension beyond actual word timings to prevent overlap
         """
         if not seg.words:
             return [seg]
@@ -284,41 +311,44 @@ class CaptionGenerator:
         if not valid_words:
             return [seg]
 
+        # Get precise timing from word data
+        first_word_start = valid_words[0].get('start', seg.start)
+        last_word_end = valid_words[-1].get('end', seg.end)
+        
         # Build karaoke text with \kf tags
-        # FIXED: Duration = time until next word (or segment end for last word)
-        # This ensures proper sync and no missing words
         karaoke_parts = []
         num_words = len(valid_words)
 
         for i, w in enumerate(valid_words):
             word = w.get('text', '').strip().upper()
             word_start = w.get('start', 0)
+            word_end = w.get('end', word_start + 0.3)
 
             if i < num_words - 1:
-                # For non-last words: duration = next_word_start - current_word_start
-                next_word_start = valid_words[i + 1].get('start', word_start)
+                # Duration = time until next word starts
+                next_word_start = valid_words[i + 1].get('start', word_start + 0.3)
                 duration_sec = next_word_start - word_start
             else:
-                # For LAST word: duration = segment_end - last_word_start
-                # This ensures the last word fills until segment ends
-                duration_sec = seg.end - word_start
+                # Last word: use its actual duration
+                duration_sec = word_end - word_start
 
-            # Convert to centiseconds with minimum duration
-            duration_cs = max(int(duration_sec * 100), 15)  # Minimum 0.15 second
+            # Ensure minimum duration for visibility (at least 200ms)
+            duration_sec = max(duration_sec, 0.2)
+            duration_cs = max(int(duration_sec * 100), 20)
 
             karaoke_parts.append(f"{{\\kf{duration_cs}}}{word}")
 
         if not karaoke_parts:
             return [seg]
 
-        # Join with spaces - single text for entire sentence
         karaoke_text = " ".join(karaoke_parts)
 
-        # Return SINGLE segment spanning entire sentence duration
+        # Use EXACT timing from words - no extension!
+        # This prevents overlap with adjacent segments
         return [CaptionSegment(
             text=karaoke_text,
-            start=seg.start,
-            end=seg.end,
+            start=round(first_word_start, 3),  # Millisecond precision
+            end=round(last_word_end, 3),
             words=None,
             is_hook=is_hook
         )]
@@ -427,19 +457,28 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                     style_name = "Default"
 
             # Apply effects based on style
+            # IMPORTANT: Skip fade effects for karaoke mode - they interfere with \kf timing!
             effects = ""
 
-            if seg.is_hook and s.enable_hook_effect:
-                # HOOK EFFECT - dramatic entrance for first caption
+            if is_karaoke:
+                # For karaoke: NO fade effects - just instant appear/disappear
+                # Fade would cut off last word and cause overlap issues
+                effects = ""
+            elif seg.is_hook and s.enable_hook_effect:
+                # HOOK EFFECT - dramatic entrance for first caption (non-karaoke only)
                 # Scale up + bounce effect + glow
+                # Use fade-in only, minimal fade-out to prevent overlap
+                fade_out_ms = min(trans_ms, 50)  # Max 50ms fade out
                 effects = (
-                    f"{{\\fad({trans_ms * 2},{trans_ms})}}"  # Longer fade in
+                    f"{{\\fad({trans_ms * 2},{fade_out_ms})}}"  # Longer fade in, minimal fade out
                     f"{{\\t(0,{trans_ms * 2},\\fscx110\\fscy110)}}"  # Scale up
                     f"{{\\t({trans_ms * 2},{trans_ms * 3},\\fscx100\\fscy100)}}"  # Bounce back
                     f"{{\\blur2\\t({trans_ms},0,\\blur0)}}"  # Blur to sharp
                 )
             elif s.transition_in == "fade":
-                effects = f"{{\\fad({trans_ms},{trans_ms})}}"
+                # Use fade-in only, minimal fade-out to prevent overlap
+                fade_out_ms = min(trans_ms, 50)  # Max 50ms fade out
+                effects = f"{{\\fad({trans_ms},{fade_out_ms})}}"
             elif s.transition_in == "pop":
                 effects = f"{{\\fscx80\\fscy80\\t(0,{trans_ms},\\fscx100\\fscy100)}}"
             elif s.transition_in == "slide_up":

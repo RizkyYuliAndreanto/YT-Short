@@ -103,6 +103,15 @@ AI_PROVIDERS_CONFIG = {
         "docs_url": "https://replicate.com/account/api-tokens",
         "requires_load": False
     },
+    "9router": {
+        "name": "🔀 9router (Local)",
+        "base_url": "http://localhost:20128/v1",
+        "description": "9router local proxy service (Claude, GPT, Gemini, DeepSeek)",
+        "default_models": ["ag/gemini-3.7-flash-high", "kr/claude-opus-5", "kr/claude-sonnet-5", "kr/deepseek-3.2", "cbai/deepseek-v4-pro"],
+        "api_key_format": "sk-*",
+        "docs_url": "http://localhost:20128",
+        "requires_load": True
+    },
     "custom": {
         "name": "⚙️ Custom/Local",
         "base_url": "http://localhost:8000/v1",
@@ -117,6 +126,7 @@ AI_PROVIDERS_CONFIG = {
 # Models for specific use cases
 SPECIALIZED_MODELS = {
     "highlight_finder": {
+        "9router": ["ag/gemini-3.7-flash-high", "kr/claude-opus-5", "kr/claude-sonnet-5", "kr/deepseek-3.2", "cbai/deepseek-v4-pro"],
         "ytclip": ["gpt-4o", "gpt-4-turbo", "gpt-4", "gpt-3.5-turbo"],
         "openai": ["gpt-4o", "gpt-4-turbo", "gpt-4", "gpt-3.5-turbo"],
         "google": ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-pro"],
@@ -130,10 +140,11 @@ SPECIALIZED_MODELS = {
         "ytclip": ["whisper-1"],
         "openai": ["whisper-1"],  # Special case for whisper
         "google": [],  # Gemini doesn't have whisper equivalent
-        "groq": ["whisper-large-v3"],  # Groq supports whisper
+        "groq": ["whisper-large-v3", "whisper-large-v3-turbo"],  # Groq supports whisper
         "openrouter": [],  # Use OpenAI for whisper
     },
     "hook_maker": {
+        "9router": ["ag/gemini-3.7-flash-high", "kr/claude-opus-5", "kr/claude-sonnet-5"],
         "ytclip": ["tts-1-hd", "tts-1"],
         "openai": ["tts-1-hd", "tts-1"],  # TTS models
         "google": [],  # Gemini doesn't have TTS built-in
@@ -141,6 +152,7 @@ SPECIALIZED_MODELS = {
         "openrouter": [],  # Use OpenAI for TTS
     },
     "youtube_title_maker": {
+        "9router": ["ag/gemini-3.7-flash-high", "kr/claude-opus-5", "kr/claude-sonnet-5", "kr/deepseek-3.2", "cbai/deepseek-v4-pro"],
         "ytclip": ["gpt-4o", "gpt-4-turbo", "gpt-4", "gpt-3.5-turbo"],
         "openai": ["gpt-4o", "gpt-4-turbo", "gpt-4", "gpt-3.5-turbo"],
         "google": ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-pro"],

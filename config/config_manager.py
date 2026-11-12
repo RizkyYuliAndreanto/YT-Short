@@ -34,6 +34,7 @@ def get_api_key_from_env(provider_key: str, config_api_key: str = "") -> str:
     
     # Otherwise, try environment variable
     env_mapping = {
+        "9router": "NINE_ROUTER_API_KEY",
         "groq": "GROQ_API_KEY",
         "openrouter": "OPENROUTER_API_KEY",
         "openai": "OPENAI_API_KEY",
@@ -44,17 +45,26 @@ def get_api_key_from_env(provider_key: str, config_api_key: str = "") -> str:
         "together": "TOGETHER_API_KEY",
         "cohere": "COHERE_API_KEY",
     }
-    
+
     env_var = env_mapping.get(provider_key, "")
     if env_var:
-        return os.environ.get(env_var, config_api_key)
-    
+        val = os.environ.get(env_var)
+        if val:
+            return val
+
+    if provider_key == "9router":
+        val = os.environ.get("ROUTER_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN")
+        if val:
+            return val
+
     return config_api_key
 
 
 def detect_provider_from_url(base_url: str) -> str:
     """Detect provider key from base URL"""
     url_mapping = {
+        ":20128": "9router",
+        "9router": "9router",
         "api.groq.com": "groq",
         "openrouter.ai": "openrouter",
         "api.openai.com": "openai",
@@ -84,7 +94,7 @@ class ConfigManager:
     def load(self):
         """Load configuration from file"""
         if self.config_file.exists():
-            with open(self.config_file, "r") as f:
+            with open(self.config_file, "r", encoding="utf-8") as f:
                 config = json.load(f)
                 
                 # Migrate old config to new multi-provider structure
@@ -144,7 +154,11 @@ class ConfigManager:
                     config["gpu_acceleration"] = {
                         "enabled": False
                     }
-                
+
+                # Add default Documentary Studio settings if not exists
+                if "documentary" not in config:
+                    config["documentary"] = self._get_default_documentary_config()
+
                 return config
         
         # Default config with system prompt
@@ -180,7 +194,8 @@ class ConfigManager:
             },
             "gpu_acceleration": {
                 "enabled": False
-            }
+            },
+            "documentary": self._get_default_documentary_config()
         }
         self.save_config(config)
         return config
@@ -189,6 +204,11 @@ class ConfigManager:
         """Get default AI provider configuration (uses Groq by default - FREE)"""
         return {
             "highlight_finder": {
+                "base_url": "https://api.groq.com/openai/v1",
+                "api_key": "",  # Will be loaded from GROQ_API_KEY env var
+                "model": "llama-3.3-70b-versatile"
+            },
+            "script_generator": {
                 "base_url": "https://api.groq.com/openai/v1",
                 "api_key": "",  # Will be loaded from GROQ_API_KEY env var
                 "model": "llama-3.3-70b-versatile"
@@ -209,7 +229,84 @@ class ConfigManager:
                 "model": "llama-3.3-70b-versatile"
             }
         }
-    
+
+    def _get_default_documentary_config(self):
+        """Default configuration for Documentary Studio (Feature 07)."""
+        return {
+            "enabled": True,
+            "default_aspect": "16:9",
+            "default_duration_seconds": 300,
+            "style": "documentary",
+            "language": "id",
+            "source_mode": "mixed",
+            "stock_footage": {
+                "enabled": True,
+                "providers": {
+                    "pexels": {
+                        "enabled": True,
+                        "api_key_env": "PEXELS_API_KEY",
+                        "base_url": "https://api.pexels.com",
+                        "timeout_seconds": 30
+                    },
+                    "pixabay": {
+                        "enabled": True,
+                        "api_key_env": "PIXABAY_API_KEY",
+                        "base_url": "https://pixabay.com/api",
+                        "timeout_seconds": 30
+                    }
+                },
+                "search": {
+                    "per_segment_candidates": 5,
+                    "orientation": "landscape",
+                    "safe_search": True,
+                    "language": "en",
+                    "max_per_provider": 10
+                },
+                "license": {
+                    "require_attribution": True,
+                    "store_metadata": True
+                }
+            },
+            "tts_provider": "edge_tts",
+            "edge_tts": {
+                "voice": "id-ID-ArdiNeural",
+                "rate": "+0%",
+                "pitch": "+0Hz",
+                "volume": "+0%"
+            },
+            "chatterbox": {
+                "enabled": False,
+                "endpoint": "http://localhost:5000",
+                "voice_id": "default",
+                "timeout_seconds": 120
+            },
+            "subtitle": {
+                "enabled": True,
+                "mode": "segment",
+                "burn_in": True,
+                "style": "documentary"
+            },
+            "bgm": {
+                "enabled": False,
+                "source": "",
+                "volume": 0.15,
+                "source_volume": 1.0
+            },
+            "render": {
+                "width": 1920,
+                "height": 1080,
+                "fps": 30,
+                "video_bitrate": "8M",
+                "segment_render": True,
+                "keep_intermediates": False
+            },
+            "limits": {
+                "max_sources": 8,
+                "max_segments": 30,
+                "max_source_duration_seconds": 7200
+            }
+        }
+
     def _migrate_to_multi_provider(self, old_config):
         """Migrate old single-provider config to new multi-provider structure"""
         api_key = old_config.get("api_key", "")
@@ -248,8 +345,8 @@ class ConfigManager:
     
     def save_config(self, config):
         """Save configuration dict to file"""
-        with open(self.config_file, "w") as f:
-            json.dump(config, f, indent=2)
+        with open(self.config_file, "w", encoding="utf-8") as f:
+            json.dump(config, f, indent=2, ensure_ascii=False)
     
     def get(self, key, default=None):
         """Get configuration value"""

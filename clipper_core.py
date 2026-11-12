@@ -680,7 +680,7 @@ KONTEN
 Transcript:
 {transcript}"""
     
-    def process(self, url: str, num_clips: int = 5, add_captions: bool = True, add_hook: bool = True):
+    def process(self, url: str, num_clips: int = 5, add_captions: bool = True, add_hook: bool = True, custom_rules: str = ""):
         """
         Main processing pipeline with checkpoint support for long videos.
         Can resume from last checkpoint if processing was interrupted.
@@ -776,7 +776,7 @@ Transcript:
         if not highlights:
             self.set_progress("Finding highlights...", 0.3)
             transcript = self.parse_srt(srt_path)
-            highlights = self.find_highlights(transcript, video_info, num_clips)
+            highlights = self.find_highlights(transcript, video_info, num_clips, custom_rules=custom_rules)
             
             # Save checkpoint after finding highlights
             self.save_checkpoint('highlights_found', {
@@ -830,7 +830,10 @@ Transcript:
         use_module = YTDLP_MODULE_AVAILABLE and self.ytdlp_path == "yt_dlp_module"
         
         if use_module:
-            return self._download_video_module(url)
+            # Prefer subprocess path for download stability (especially YouTube SABR sessions).
+            # We still use the installed module by invoking `python -m yt_dlp` in subprocess mode.
+            self.log("  Using module-backed subprocess downloader for better reliability...")
+            return self._download_video_subprocess(url)
         else:
             return self._download_video_subprocess(url)
     
@@ -999,6 +1002,28 @@ Transcript:
                 self.log(f"  Downloading video with {self.subtitle_language} subtitle...")
                 ydl.download([url])
             
+            video_path = self.temp_dir / "source.mp4"
+            part_path = self.temp_dir / "source.mp4.part"
+            state_path = self.temp_dir / "source.mp4.ytdl"
+
+            # yt-dlp module mode may finish subtitle download while video stream stalls
+            # (e.g. SABR / client-format mismatch). Detect this and fallback to subprocess strategy.
+            invalid_video = (
+                (not video_path.exists())
+                or (video_path.exists() and video_path.stat().st_size == 0)
+                or (part_path.exists() and part_path.stat().st_size == 0)
+            )
+            if invalid_video:
+                self.log("  ⚠ Video file not completed in module mode (only partial/subtitle artifacts found)")
+                self.log("  ↪ Falling back to subprocess download strategy...")
+                for stale_path in (video_path, part_path, state_path):
+                    try:
+                        if stale_path.exists():
+                            stale_path.unlink()
+                    except Exception as cleanup_err:
+                        self.log(f"  Warning: could not remove stale file {stale_path.name}: {cleanup_err}")
+                return self._download_video_subprocess(url)
+
             self.log(f"  ✓ Download successful!")
                 
         except Exception as e:
@@ -1100,10 +1125,12 @@ Transcript:
     
     def _download_video_subprocess(self, url: str) -> tuple:
         """Download video using yt-dlp subprocess (fallback)"""
+        ytdlp_cmd = [sys.executable, "-m", "yt_dlp"] if self.ytdlp_path == "yt_dlp_module" else [self.ytdlp_path]
+
         # Validate yt-dlp is available
         try:
             version_check = subprocess.run(
-                [self.ytdlp_path, "--version"],
+                [*ytdlp_cmd, "--version"],
                 capture_output=True,
                 text=True,
                 creationflags=SUBPROCESS_FLAGS,
@@ -1122,7 +1149,7 @@ Transcript:
         base_args = []
         try:
             help_result = subprocess.run(
-                [self.ytdlp_path, "--help"],
+                [*ytdlp_cmd, "--help"],
                 capture_output=True,
                 text=True,
                 creationflags=SUBPROCESS_FLAGS,
@@ -1137,7 +1164,7 @@ Transcript:
         
         # Get video metadata
         self.log("  Fetching video info...")
-        meta_cmd = [self.ytdlp_path, "--dump-json", "--no-download", *base_args, url]
+        meta_cmd = [*ytdlp_cmd, "--dump-json", "--no-download", *base_args, url]
         
         result = subprocess.run(
             meta_cmd, 
@@ -1161,9 +1188,26 @@ Transcript:
         
         # Download video + subtitle with progress
         self.log(f"  Downloading video with {self.subtitle_language} subtitle...")
+
+        # Resolve cookies file path (prefer app cookies.txt)
+        from utils.helpers import get_app_dir
+        app_dir = get_app_dir()
+        cookie_candidates = [
+            Path("cookies.txt"),
+            app_dir / "cookies.txt",
+        ]
+        cookies_file = next((p for p in cookie_candidates if p.exists()), None)
         
         # Try multiple download strategies (fallback on failure)
-        download_strategies = [
+        download_strategies = []
+        if cookies_file:
+            download_strategies.append(
+                {
+                    "name": "cookies.txt file",
+                    "extra_args": ["--cookies", str(cookies_file)]
+                }
+            )
+        download_strategies.extend([
             {
                 "name": "Browser cookies (Chrome)",
                 "extra_args": ["--cookies-from-browser", "chrome"]
@@ -1176,7 +1220,7 @@ Transcript:
                 "name": "Simple format (no auth)",
                 "extra_args": []
             }
-        ]
+        ])
         
         # High-quality format selector (prioritize 720p+ with fallback)
         format_selector = "bestvideo[height>=720][height<=2160]+bestaudio/best[height>=720][height<=2160]/bestvideo+bestaudio/best"
@@ -1189,7 +1233,7 @@ Transcript:
             self.log(f"  Trying: {strategy['name']}...")
             
             cmd = [
-                self.ytdlp_path,
+                *ytdlp_cmd,
                 "-f", format_selector,
                 "--format-sort", "res,br",
                 *base_args,
@@ -1395,23 +1439,45 @@ Transcript:
                     "automatic_captions": []
                 }
             
-            # Validate cookies file has required YouTube auth cookies
-            required_cookies = ['SID', 'HSID', 'SSID', 'APISID', 'SAPISID', 'LOGIN_INFO']
+            # Validate cookies file has required YouTube auth cookies.
+            # YouTube now often uses __Secure-* cookies instead of legacy SID/APISID names.
+            auth_cookie_candidates = {
+                'SID', 'HSID', 'SSID', 'APISID', 'SAPISID', 'LOGIN_INFO',
+                '__Secure-1PSID', '__Secure-1PAPISID',
+                '__Secure-3PSID', '__Secure-3PAPISID'
+            }
             found_cookies = []
             try:
                 with open(cookies_path, 'r', encoding='utf-8') as f:
-                    content = f.read()
-                    for cookie in required_cookies:
-                        # Check for cookie name in the file (tab-separated format)
-                        if f"\t{cookie}\t" in content or content.endswith(f"\t{cookie}"):
-                            found_cookies.append(cookie)
+                    cookie_names = set()
+                    for raw_line in f:
+                        line = raw_line.strip()
+                        if not line or line.startswith("#"):
+                            continue
+                        # Netscape format: domain \t flag \t path \t secure \t expiry \t name \t value
+                        parts = line.split("\t")
+                        if len(parts) >= 7 and parts[5]:
+                            cookie_names.add(parts[5])
+
+                    found_cookies = sorted(cookie_names.intersection(auth_cookie_candidates))
+
+                has_valid_auth = (
+                    "LOGIN_INFO" in found_cookies
+                    or {"SID", "SAPISID"}.issubset(set(found_cookies))
+                    or {"__Secure-1PSID", "__Secure-1PAPISID"}.issubset(set(found_cookies))
+                    or {"__Secure-3PSID", "__Secure-3PAPISID"}.issubset(set(found_cookies))
+                )
                 
-                if not found_cookies:
+                if not has_valid_auth:
                     debug_log(f"Cookies file missing required auth cookies. Found: {found_cookies}")
                     return {
                         "error": "Invalid cookies.txt - missing YouTube authentication cookies.\n\n"
                                  "Please export fresh cookies from your browser while logged into YouTube.\n\n"
-                                 "Required cookies: SID, HSID, SSID, APISID, SAPISID, LOGIN_INFO\n\n"
+                                 "Required cookies (any valid set):\n"
+                                 "• LOGIN_INFO\n"
+                                 "• SID + SAPISID\n"
+                                 "• __Secure-1PSID + __Secure-1PAPISID\n"
+                                 "• __Secure-3PSID + __Secure-3PAPISID\n\n"
                                  "Use a browser extension like 'Get cookies.txt LOCALLY' to export.",
                         "subtitles": [],
                         "automatic_captions": []
@@ -1498,6 +1564,8 @@ Transcript:
     def _get_subtitles_subprocess(url: str, ytdlp_path: str, cookies_path: str, lang_names: dict) -> dict:
         """Get subtitles using yt-dlp subprocess (fallback)"""
         try:
+            ytdlp_cmd = [sys.executable, "-m", "yt_dlp"] if ytdlp_path == "yt_dlp_module" else [ytdlp_path]
+
             # Check if cookies.txt exists
             if not cookies_path or not Path(cookies_path).exists():
                 return {
@@ -1521,13 +1589,13 @@ Transcript:
             
             # Use --dump-json to get structured data
             # NOTE: Don't use player_client=android with cookies - it bypasses cookie auth
-            cmd = [ytdlp_path, "--dump-json", "--skip-download", 
+            cmd = [*ytdlp_cmd, "--dump-json", "--skip-download", 
                    "--cookies", cookies_path]
             
             # Check for remote-components support (requires Deno)
             try:
                 help_result = subprocess.run(
-                    [ytdlp_path, "--help"],
+                    [*ytdlp_cmd, "--help"],
                     capture_output=True,
                     text=True,
                     creationflags=SUBPROCESS_FLAGS,
@@ -2144,79 +2212,99 @@ Transcript:
     
     def find_highlights(self, transcript: str, video_info: dict, num_clips: int,
                          min_duration: float = 58, max_duration: float = 120,
-                         force_system_prompt: bool = False) -> list:
+                         force_system_prompt: bool = False,
+                         custom_rules: str = "") -> list:
         """Find highlights using GPT or Gemini - with automatic chunking for long transcripts.
-        
+
         Args:
             force_system_prompt: If True, always use self.system_prompt instead of compact prompt.
                                  Used by ClipDubEngine to preserve context-aware prompts.
+            custom_rules: Specific clipping instructions/rules (e.g. campaign brief).
         """
         self.log(f"[2/4] Finding highlights (using {self.model})...")
-        
+        if custom_rules and custom_rules.strip():
+            self.log(f"  📋 Custom clipping rules active (Campaign/Brief mode)")
+
         # Estimate token count
         estimated_tokens = self.estimate_token_count(transcript)
         self.log(f"  📊 Estimated transcript tokens: {estimated_tokens}")
-        
+
         # Check if we need chunking (GROQ free tier limit: 12000 TPM)
         # Use 8000 as threshold to leave room for prompt + response
         use_chunking = estimated_tokens > 8000
         use_compact_prompt = estimated_tokens > 5000 and not force_system_prompt
-        
+
         if force_system_prompt:
             self.log(f"  🎯 Using custom system prompt (context-aware mode)")
-        
+
         if use_chunking:
             self.log(f"  📦 Using chunked processing for long transcript")
             highlights = self._find_highlights_chunked(transcript, video_info, num_clips,
                                                        min_duration=min_duration, max_duration=max_duration,
-                                                       force_system_prompt=force_system_prompt)
+                                                       force_system_prompt=force_system_prompt,
+                                                       custom_rules=custom_rules)
         else:
             # For shorter transcripts, use standard processing
             highlights = self._find_highlights_single(transcript, video_info, num_clips, use_compact_prompt,
-                                                      min_duration=min_duration, max_duration=max_duration)
-        
+                                                      min_duration=min_duration, max_duration=max_duration,
+                                                      custom_rules=custom_rules)
+
         # Post-process: boost virality scores based on heatmap data
         if self.heatmap_data and self.use_heatmap:
             self.log("  📊 Applying heatmap score boosting...")
             highlights = self.boost_highlights_with_heatmap(highlights)
-        
+
         return highlights
-    
+
     def _find_highlights_single(self, transcript: str, video_info: dict, num_clips: int, use_compact: bool = False,
-                                  min_duration: float = 58, max_duration: float = 120) -> list:
+                                  min_duration: float = 58, max_duration: float = 120,
+                                  custom_rules: str = "") -> list:
         """Process a single transcript (not chunked)"""
         # Request more than needed — many get filtered by duration
         # When using custom system prompt (use_compact=False due to force), request less overhead
         request_clips = max(num_clips + 3, int(num_clips * 1.5)) if not use_compact else max(num_clips + 5, int(num_clips * 2))
-        
+
         video_context = ""
         if video_info:
             video_context = f"""INFO VIDEO:
 - Judul: {video_info.get('title', 'Unknown')}
 - Channel: {video_info.get('channel', 'Unknown')}
 - Deskripsi: {video_info.get('description', '')[:300]}"""
-        
+
+        # Add custom rules if present
+        if custom_rules and custom_rules.strip():
+            rules_block = f"""
+==================================================
+🎯 ATURAN & BRIEF WAJIB DARI USER (PRIORITAS UTAMA / TERTINGGI):
+{custom_rules.strip()}
+==================================================
+⚠️ INSTRUKSI SANGAT PENTING:
+- Utamakan & WAJIB cari momen yang secara spesifik memenuhi aturan/brief di atas!
+- Filter dan abaikan momen lain yang melanggar pantangan/larangan di atas."""
+            video_context = f"{rules_block}\n\n{video_context}" if video_context else rules_block
+
         # Add heatmap data to video context
         heatmap_context = self.format_heatmap_for_prompt()
         if heatmap_context:
             video_context += f"\n\n{heatmap_context}"
             self.log("  📊 Heatmap data injected into AI prompt")
-        
+
         # Choose prompt based on token budget
         base_prompt = self.get_compact_prompt() if use_compact else self.system_prompt
-        
+
         # Replace placeholders safely
         prompt = base_prompt.replace("{num_clips}", str(request_clips))
         prompt = prompt.replace("{video_context}", video_context)
         prompt = prompt.replace("{transcript}", transcript)
-        
+
         result = self._call_ai_api(prompt)
         return self._parse_highlights_result(result, num_clips,
                                               min_duration=min_duration, max_duration=max_duration)
-    
+
     def _find_highlights_chunked(self, transcript: str, video_info: dict, num_clips: int,
                                   min_duration: float = 58, max_duration: float = 120,
-                                  force_system_prompt: bool = False) -> list:
+                                  force_system_prompt: bool = False,
+                                  custom_rules: str = "") -> list:
         """
         Process long transcript in chunks with parallel API calls.
         Optimized for videos 3-12+ hours.
@@ -2224,7 +2312,7 @@ Transcript:
         chunks = self.chunk_transcript(transcript, max_tokens=6000)
         num_chunks = len(chunks)
         self.log(f"  📦 Split into {num_chunks} chunks")
-        
+
         # Smart clip distribution: more clips from beginning/end (typically more interesting)
         # For very long videos, distribute evenly but request more per chunk
         if num_chunks <= 3:
@@ -2234,15 +2322,27 @@ Transcript:
         else:
             # Very long video (>10 chunks): request fewer per chunk but more total
             clips_per_chunk = max(2, (num_clips * 2) // num_chunks + 1)
-        
+
         self.log(f"  📊 Requesting {clips_per_chunk} clips per chunk (total: ~{clips_per_chunk * num_chunks})")
-        
+
         video_context = ""
         if video_info:
             video_context = f"""INFO VIDEO:
 - Judul: {video_info.get('title', 'Unknown')}
 - Channel: {video_info.get('channel', 'Unknown')}"""
-        
+
+        # Add custom rules if present
+        if custom_rules and custom_rules.strip():
+            rules_block = f"""
+==================================================
+🎯 ATURAN & BRIEF WAJIB DARI USER (PRIORITAS UTAMA / TERTINGGI):
+{custom_rules.strip()}
+==================================================
+⚠️ INSTRUKSI SANGAT PENTING:
+- Utamakan & WAJIB cari momen yang secara spesifik memenuhi aturan/brief di atas!
+- Filter dan abaikan momen lain yang melanggar pantangan/larangan di atas."""
+            video_context = f"{rules_block}\n\n{video_context}" if video_context else rules_block
+
         # Add heatmap data to video context
         heatmap_context = self.format_heatmap_for_prompt()
         if heatmap_context:
@@ -2367,9 +2467,10 @@ Transcript:
         return unique
     
     def _call_ai_api(self, prompt: str) -> str:
-        """Call AI API (Gemini or OpenAI-compatible)"""
-        # Check if using Google Gemini
-        if "gemini" in self.model.lower() and GOOGLE_GENAI_AVAILABLE:
+        """Call AI API (Gemini direct or OpenAI-compatible)"""
+        # Only use native Google GenAI SDK if hitting official Google API endpoint
+        base_url = str(getattr(self.highlight_client, "base_url", "")).lower()
+        if "gemini" in self.model.lower() and GOOGLE_GENAI_AVAILABLE and "generativelanguage.googleapis.com" in base_url:
             return self._call_gemini_api(prompt)
         
         # Use OpenAI SDK for OpenAI, Groq, Anthropic, etc.
@@ -4886,9 +4987,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         if not Path(output_path).exists():
             raise Exception("Failed to apply credit watermark")
 
-    def find_highlights_only(self, url: str, num_clips: int = 5) -> dict:
+    def find_highlights_only(self, url: str, num_clips: int = 5, custom_rules: str = "") -> dict:
         """Phase 1: Download video and find highlights (without processing)
-        
+
         Returns:
             dict with keys:
                 - 'session_dir': Path to session directory
@@ -4937,7 +5038,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         # Step 2: Find highlights
         self.set_progress("Finding highlights with AI...", 0.5)
         transcript = self.parse_srt(srt_path)
-        highlights = self.find_highlights(transcript, video_info, num_clips)
+        highlights = self.find_highlights(transcript, video_info, num_clips, custom_rules=custom_rules)
         
         if self.is_cancelled():
             return None

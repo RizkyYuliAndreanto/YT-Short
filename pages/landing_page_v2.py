@@ -200,7 +200,27 @@ class LandingPage(ctk.CTkFrame):
             tooltip="Extract audio → Transcribe dengan Whisper → Edit script → Burn caption ke video",
             badge="NEW"
         )
-    
+
+        # Row 4
+        row4 = ctk.CTkFrame(parent, fg_color="transparent")
+        row4.pack(pady=(Spacing.MD, 0))
+
+        # Card 7: Documentary Studio
+        self._create_mode_card(row4,
+            icon="🎞️",
+            title="Documentary Studio",
+            description="Buat video dokumenter YouTube 16:9 dari brief,\nURL, dan stock footage Pexels/Pixabay.",
+            accent_color=Colors.INFO,  # Cyan
+            command=lambda: self.app.show_page("documentary"),
+            tooltip="Long-form documentary: AI outline → multi-source clips → TTS narasi → subtitle → render 16:9",
+            badge="NEW"
+        )
+
+        # Spacer to keep the single card visually centered in the 2-column grid
+        spacer = ctk.CTkFrame(row4, width=290, height=170, fg_color="transparent")
+        spacer.pack(side="left", padx=Spacing.SM)
+        spacer.pack_propagate(False)
+
     def _create_mode_card(self, parent, icon, title, description, accent_color, 
                           command, tooltip=None, badge=None):
         """Create a modern mode selection card"""

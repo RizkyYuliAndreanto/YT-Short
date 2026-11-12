@@ -123,8 +123,8 @@ def get_deno_path():
 def extract_video_id(url: str) -> str:
     """Extract YouTube video ID from URL"""
     patterns = [
-        r'(?:v=|\/)([0-9A-Za-z_-]{11}).*',
-        r'(?:youtu\.be\/)([0-9A-Za-z_-]{11})'
+        r'(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/shorts\/|youtube\.com\/live\/)([0-9A-Za-z_-]{11})',
+        r'(?:v=|\/)([0-9A-Za-z_-]{11}).*'
     ]
     for pattern in patterns:
         match = re.search(pattern, url)

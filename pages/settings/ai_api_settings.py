@@ -36,15 +36,19 @@ class AIAPISettingsSubPage(BaseSettingsSubPage):
         # Provider buttons
         btn_frame = ctk.CTkFrame(quick_frame, fg_color="transparent")
         btn_frame.pack(side="left", padx=5)
-        
+
+        ctk.CTkButton(btn_frame, text="🔀 9router (Local)", width=130,
+            fg_color="#8b5cf6", hover_color="#7c3aed",
+            command=lambda: self._apply_provider("9router")).pack(side="left", padx=2)
+
         ctk.CTkButton(btn_frame, text="🚀 GROQ (Free)", width=120,
             fg_color="#f55036", hover_color="#d44030",
             command=lambda: self._apply_provider("groq")).pack(side="left", padx=2)
-        
+
         ctk.CTkButton(btn_frame, text="🌐 OpenRouter", width=120,
             fg_color="#6366f1", hover_color="#4f46e5",
             command=lambda: self._apply_provider("openrouter")).pack(side="left", padx=2)
-        
+
         ctk.CTkButton(btn_frame, text="🤖 OpenAI", width=120,
             fg_color="#10a37f", hover_color="#0d8a6a",
             command=lambda: self._apply_provider("openai")).pack(side="left", padx=2)
@@ -77,6 +81,12 @@ class AIAPISettingsSubPage(BaseSettingsSubPage):
         
         # Provider-specific default models
         provider_defaults = {
+            "9router": {
+                "highlight_finder": "ag/gemini-3.7-flash-high",
+                "caption_maker": "whisper-large-v3-turbo",  # Groq Whisper fallback
+                "hook_maker": "ag/gemini-3.7-flash-high",
+                "youtube_title_maker": "ag/gemini-3.7-flash-high"
+            },
             "groq": {
                 "highlight_finder": "llama-3.3-70b-versatile",
                 "caption_maker": "whisper-large-v3",

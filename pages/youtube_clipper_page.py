@@ -132,12 +132,12 @@ class YouTubeClipperPage(ctk.CTkFrame):
         self.url_var.trace_add("write", self._on_url_change)
         
         self.url_entry = ctk.CTkEntry(input_frame, textvariable=self.url_var,
-            placeholder_text="https://www.youtube.com/watch?v=...",
+            placeholder_text="https://www.youtube.com/watch?v=... or /live/...",
             fg_color=Colors.BG_SECONDARY, border_color=Colors.BORDER,
             text_color=Colors.TEXT_PRIMARY, font=Fonts.body(),
             corner_radius=BorderRadius.SM, height=42)
         self.url_entry.pack(side="left", fill="x", expand=True, padx=(0, Spacing.SM))
-        ToolTip(self.url_entry, "Enter a valid YouTube video URL (youtube.com/watch?v=... or youtu.be/...)")
+        ToolTip(self.url_entry, "Enter a valid YouTube video URL (watch?v=..., youtu.be/..., shorts/..., or live/...)")
         
         paste_btn = create_styled_button(input_frame, "Paste",
             command=self._paste_url,
@@ -279,34 +279,34 @@ class YouTubeClipperPage(ctk.CTkFrame):
         # Processing mode
         mode_frame = ctk.CTkFrame(settings_row, fg_color="transparent")
         mode_frame.pack(side="left")
-        
+
         create_styled_label(mode_frame, "Processing Mode:", style="caption").pack(anchor="w")
-        
+
         self.mode_var = ctk.StringVar(value="full")
-        
+
         mode_options = ctk.CTkFrame(mode_frame, fg_color="transparent")
         mode_options.pack(anchor="w", pady=(4, 0))
-        
+
         full_radio = ctk.CTkRadioButton(mode_options, text="Full Auto",
             variable=self.mode_var, value="full", font=Fonts.body_sm(),
             fg_color=Colors.ACCENT_PRIMARY, hover_color=Colors.BTN_PRIMARY_HOVER,
             border_color=Colors.BORDER)
         full_radio.pack(side="left", padx=(0, Spacing.MD))
         ToolTip(full_radio, "Automatically process all clips without manual selection")
-        
+
         select_radio = ctk.CTkRadioButton(mode_options, text="Select Highlights",
             variable=self.mode_var, value="select", font=Fonts.body_sm(),
             fg_color=Colors.ACCENT_PRIMARY, hover_color=Colors.BTN_PRIMARY_HOVER,
             border_color=Colors.BORDER)
         select_radio.pack(side="left")
         ToolTip(select_radio, "Review and select which highlights to process")
-        
+
         # Heatmap toggle
         heatmap_frame = ctk.CTkFrame(settings_row, fg_color="transparent")
         heatmap_frame.pack(side="left", padx=(Spacing.XL, 0))
-        
+
         create_styled_label(heatmap_frame, "Heatmap Boost:", style="caption").pack(anchor="w")
-        
+
         self.heatmap_var = ctk.BooleanVar(value=True)
         heatmap_cb = ctk.CTkCheckBox(heatmap_frame, text="📊 Most Replayed",
             variable=self.heatmap_var, font=Fonts.body_sm(),
@@ -314,6 +314,54 @@ class YouTubeClipperPage(ctk.CTkFrame):
             border_color=Colors.BORDER, checkbox_width=20, checkbox_height=20)
         heatmap_cb.pack(anchor="w", pady=(4, 0))
         ToolTip(heatmap_cb, "Use YouTube heatmap data to boost clips from most-replayed segments")
+
+        # Section Divider
+        create_section_divider(section).pack(fill="x", padx=Spacing.MD, pady=(Spacing.SM, Spacing.MD))
+
+        # Clipping Rules / Campaign Brief Section
+        rules_container = ctk.CTkFrame(section, fg_color="transparent")
+        rules_container.pack(fill="x", padx=Spacing.MD, pady=(0, Spacing.MD))
+
+        rules_header = ctk.CTkFrame(rules_container, fg_color="transparent")
+        rules_header.pack(fill="x", pady=(0, 6))
+
+        create_styled_label(rules_header, "Target & Aturan Clipping:", style="caption").pack(side="left")
+
+        # Rule Mode: Bebas vs Ada Aturan
+        self.rule_mode_var = ctk.StringVar(value="free")
+
+        rule_mode_frame = ctk.CTkFrame(rules_container, fg_color="transparent")
+        rule_mode_frame.pack(fill="x", pady=(0, Spacing.SM))
+
+        free_radio = ctk.CTkRadioButton(rule_mode_frame, text="🎲 Bebas (Auto Viral)",
+            variable=self.rule_mode_var, value="free", font=Fonts.body_sm(),
+            command=self._on_rule_mode_change,
+            fg_color=Colors.ACCENT_PRIMARY, hover_color=Colors.BTN_PRIMARY_HOVER,
+            border_color=Colors.BORDER)
+        free_radio.pack(side="left", padx=(0, Spacing.LG))
+        ToolTip(free_radio, "AI bebas mencari momen paling viral dan menarik di video")
+
+        rules_radio = ctk.CTkRadioButton(rule_mode_frame, text="📋 Ada Aturan (Campaign / Brief)",
+            variable=self.rule_mode_var, value="custom", font=Fonts.body_sm(),
+            command=self._on_rule_mode_change,
+            fg_color=Colors.ACCENT_PRIMARY, hover_color=Colors.BTN_PRIMARY_HOVER,
+            border_color=Colors.BORDER)
+        rules_radio.pack(side="left")
+        ToolTip(rules_radio, "Beri aturan atau brief khusus (wajib klip momen tertentu, larangan tertentu)")
+
+        # Textbox for custom rules (collapsible/expandable)
+        self.custom_rules_frame = ctk.CTkFrame(rules_container, fg_color="transparent")
+
+        rules_guide_label = create_styled_label(self.custom_rules_frame,
+            "📝 Tulis / Paste aturan brief di bawah ini (contoh: momen wajib, larangan, topik target):",
+            style="muted")
+        rules_guide_label.pack(anchor="w", pady=(0, 4))
+
+        self.custom_rules_textbox = ctk.CTkTextbox(self.custom_rules_frame,
+            height=110, fg_color=Colors.BG_SECONDARY, border_color=Colors.BORDER,
+            border_width=1, text_color=Colors.TEXT_PRIMARY, font=Fonts.body_sm(),
+            corner_radius=BorderRadius.SM)
+        self.custom_rules_textbox.pack(fill="x", expand=True)
         
         # Cookies status
         cookies_frame = ctk.CTkFrame(section, fg_color=Colors.BG_SECONDARY, 
@@ -404,7 +452,7 @@ class YouTubeClipperPage(ctk.CTkFrame):
     def _extract_video_id(self, url):
         """Extract video ID from YouTube URL"""
         patterns = [
-            r'(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})',
+            r'(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/live\/)([a-zA-Z0-9_-]{11})',
             r'(?:youtube\.com\/shorts\/)([a-zA-Z0-9_-]{11})',
         ]
         
@@ -565,30 +613,38 @@ class YouTubeClipperPage(ctk.CTkFrame):
         )
         self.subtitle_loaded = True
     
+    def _on_rule_mode_change(self):
+        """Handle rule mode toggle (free vs custom)"""
+        mode = self.rule_mode_var.get()
+        if mode == "custom":
+            self.custom_rules_frame.pack(fill="x", pady=(Spacing.XS, 0))
+        else:
+            self.custom_rules_frame.pack_forget()
+
     def _start_processing(self):
         """Start the clipping process"""
         url = self.url_var.get().strip()
-        
+
         if not url:
             messagebox.showwarning("No URL", "Please enter a YouTube URL first.")
             return
-        
+
         video_id = self._extract_video_id(url)
         if not video_id:
             messagebox.showwarning("Invalid URL", "Please enter a valid YouTube URL.")
             return
-        
+
         # Check if subtitles are loaded
         if not self.subtitle_loaded:
             messagebox.showwarning("Loading", "Please wait for subtitles to finish loading.")
             return
-        
+
         # Validate subtitle selection
         subtitle_sel = self.subtitle_var.get().strip()
         if not subtitle_sel or subtitle_sel == "(loading...)" or " - " not in subtitle_sel:
             messagebox.showwarning("No Subtitle", "Please select a valid subtitle language from the dropdown.")
             return
-        
+
         try:
             clips = int(self.clips_var.get())
             if clips < 1 or clips > 50:
@@ -596,10 +652,21 @@ class YouTubeClipperPage(ctk.CTkFrame):
         except:
             messagebox.showwarning("Invalid Clips", "Clip count must be between 1 and 50.")
             return
-        
+
+        # Handle custom rules
+        custom_rules = ""
+        if self.rule_mode_var.get() == "custom":
+            custom_rules = self.custom_rules_textbox.get("1.0", "end-1c").strip()
+            if not custom_rules:
+                messagebox.showwarning("Aturan Kosong", "Mode 'Ada Aturan' dipilih, silakan masukkan detail aturan atau brief clipping terlebih dahulu.")
+                return
+
+        # Sync custom_rules to app level
+        self.app.custom_rules = custom_rules
+
         # Variables already on app level, no need to copy
         # self.app.url_var, self.app.clips_var, self.app.subtitle_var are already synced
-        
+
         if self.mode_var.get() == "select":
             # Go to highlight selection
             self.app.use_heatmap = self.heatmap_var.get()

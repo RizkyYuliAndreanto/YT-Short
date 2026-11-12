@@ -226,23 +226,80 @@ class VideoAnalyzer:
                 
                 response = client.audio.transcriptions.create(**transcribe_params)
                 
+                # APPROACH: Use word-level timestamps as primary source
+                # Group words into segments based on natural pauses (gaps > 0.5s)
+                # This is more accurate than relying on Whisper's segment boundaries
+                
                 segments = []
-                for seg in response.segments:
-                    words = None
-                    if hasattr(response, 'words') and response.words:
-                        # Filter words for this segment
-                        words = [
-                            {"text": w.word, "start": w.start, "end": w.end}
-                            for w in response.words
-                            if w.start >= seg.start and w.end <= seg.end
-                        ]
+                
+                if hasattr(response, 'words') and response.words and len(response.words) > 0:
+                    # Build segments from word timings directly
+                    current_words = []
+                    current_text_parts = []
                     
-                    segments.append(TranscriptSegment(
-                        text=seg.text.strip(),
-                        start=seg.start,
-                        end=seg.end,
-                        words=words
-                    ))
+                    for i, w in enumerate(response.words):
+                        word_text = w.word.strip() if hasattr(w, 'word') else str(w).strip()
+                        if not word_text:
+                            continue
+                            
+                        current_words.append({
+                            "text": word_text,
+                            "start": round(w.start, 3),  # Keep millisecond precision
+                            "end": round(w.end, 3)
+                        })
+                        current_text_parts.append(word_text)
+                        
+                        # Check if we should end this segment
+                        # End segment if: 
+                        # 1. This is the last word
+                        # 2. There's a pause > 0.3s before next word
+                        # 3. Segment has 15+ words (natural sentence break)
+                        should_end_segment = False
+                        
+                        if i == len(response.words) - 1:
+                            should_end_segment = True
+                        elif i < len(response.words) - 1:
+                            next_word = response.words[i + 1]
+                            gap = next_word.start - w.end
+                            # End on pause or punctuation
+                            if gap > 0.3 or word_text.endswith(('.', '?', '!', ',')):
+                                should_end_segment = True
+                            # Also end if segment is getting long
+                            if len(current_words) >= 15:
+                                should_end_segment = True
+                        
+                        if should_end_segment and current_words:
+                            seg_start = current_words[0]['start']
+                            seg_end = current_words[-1]['end']
+                            seg_text = ' '.join(current_text_parts)
+                            
+                            segments.append(TranscriptSegment(
+                                text=seg_text.strip(),
+                                start=seg_start,
+                                end=seg_end,
+                                words=current_words.copy()
+                            ))
+                            current_words = []
+                            current_text_parts = []
+                    
+                    # Handle any remaining words
+                    if current_words:
+                        segments.append(TranscriptSegment(
+                            text=' '.join(current_text_parts).strip(),
+                            start=current_words[0]['start'],
+                            end=current_words[-1]['end'],
+                            words=current_words.copy()
+                        ))
+                
+                else:
+                    # Fallback: use Whisper's segments if no word data
+                    for seg in response.segments:
+                        segments.append(TranscriptSegment(
+                            text=seg.text.strip(),
+                            start=round(seg.start, 3),
+                            end=round(seg.end, 3),
+                            words=None
+                        ))
                 
                 return segments, response.text
                 

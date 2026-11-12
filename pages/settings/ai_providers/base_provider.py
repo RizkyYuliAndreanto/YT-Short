@@ -16,6 +16,7 @@ def get_provider_dropdown_options():
     """Get list of provider display names for dropdown"""
     # Priority order - most commonly used first
     priority_order = [
+        "9router",
         "ytclip",
         "openai",
         "groq",
