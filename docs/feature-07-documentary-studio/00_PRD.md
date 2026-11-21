@@ -33,7 +33,7 @@ Fitur existing sudah memiliki banyak komponen, tetapi belum ada mode yang mengga
 - Tidak menggantikan YouTube Clipper, Clip+Dub, Dubbing Studio, Clip Cutter, TTS Maker, atau Auto Caption.
 - Tidak auto-publish ke YouTube/TikTok/Instagram secara default.
 - Tidak menjamin hak cipta footage; tetap ada disclaimer dan kontrol manual.
-- Pencarian video panjang otomatis (`ytsearch`/YouTube Data API) tetap fase lanjut; stock footage B-roll Pexels/Pixabay adalah provider terpisah yang boleh dipakai lebih awal jika API key terkonfigurasi.
+- Pencarian video panjang otomatis (`ytsearch`/YouTube Data API) tetap fase lanjut dan bukan jalur default; stock footage B-roll Pexels/Pixabay menjadi jalur pencarian utama jika API key terkonfigurasi.
 - Tidak mengubah pipeline portrait 9:16 yang sudah ada.
 - Tidak mengharuskan Chatterbox TTS untuk MVP; Edge TTS adalah baseline, Chatterbox adalah provider lanjutan.
 
@@ -201,7 +201,7 @@ Sistem harus menghasilkan `data.json`/manifest berisi judul, deskripsi, tags, su
 
 | Risiko | Dampak | Mitigasi |
 |---|---|---|
-| Hak cipta footage | Legal/YouTube claim | Manual review, disclaimer, jangan auto-publish, dokumentasikan sumber. |
+| Hak cipta footage | Legal/YouTube claim | Manual review, disclaimer, jangan auto-publish, dokumentasikan sumber, dan terapkan source policy: hindari channel narasi dokumenter/lokal non-open sebagai backbone; utamakan open-access/arsip/Wikimedia; medsos hanya klip pendek ~5–15 detik. |
 | YouTube/yt-dlp block | Download gagal | Cookies, retry, fallback metadata/subtitle-only, pesan error jelas. |
 | 9router down/model jelek | Outline/script gagal | Provider fallback chain, validasi JSON, retry prompt. |
 | Whisper tidak support provider | Transkripsi gagal | Pastikan `caption_maker` diarahkan ke Whisper-compatible; dokumentasikan setting. |

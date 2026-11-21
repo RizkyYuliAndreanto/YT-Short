@@ -14,13 +14,15 @@ Tujuan folder ini adalah menjadi sumber kebenaran untuk AI agent dan developer a
 | `03_TASK_BREAKDOWN.md` | Rincian task implementasi per file/modul dengan dependency dan acceptance check. |
 | `04_AI_AGENT_GUARDRAILS.md` | Aturan wajib untuk AI agent saat coding: larangan, pola reuse, threading, config, secrets, verifikasi. |
 | `05_ACCEPTANCE_CRITERIA.md` | Kriteria penerimaan MVP dan edge cases yang harus lulus sebelum fitur dianggap selesai. |
+| `v2-script-first-footage-second/` | Planning pack V2 untuk revisi logic ke script-first → footage-second, termasuk PRD, SDLC, guardrails, dan context preservation. |
+| `revision-v3/` | Paket revisi bertahap setelah audit: master plan, PRD/SDLC/guardrails/JEV per tahap, serta release gate. |
 
 ## Keputusan utama yang sudah disepakati
 
 - Fitur ini adalah **mode ke-7 yang berdiri sendiri**, bukan revisi YouTube Clipper, AI Dubbing Studio, Clip+Dub, Clip Cutter, TTS Maker, atau Auto Caption.
 - Output utama adalah **video YouTube landscape 16:9**, biasanya berdurasi menengah-panjang.
 - Fokus awal: **clip-clip dari sumber video + narasi teks yang sinkron per segmen**.
-- Sumber: **manual multi-URL** + **stock footage provider opsional (Pexels/Pixabay)**. API key dan `base_url` bisa dikonfigurasi; AI menghasilkan query/pencarian/rekomendasi footage, sedangkan download tetap lewat API/provider adapter resmi.
+- Sumber default: **stock footage Pexels/Pixabay**. AI menghasilkan query visual yang spesifik, sedangkan pencarian dan download dilakukan lewat API/provider adapter resmi. Mode `manual_urls` atau `mixed` tetap tersedia bila pengguna memang membutuhkan sumber URL.
 - Pencarian video panjang otomatis (`ytsearch`/YouTube Data API) tetap fase lanjutan; stock footage B-roll Pexels/Pixabay boleh masuk scope lebih awal jika API key tersedia.
 - LLM/otak: utamakan **9router** sebagai OpenAI-compatible chat provider untuk outline, pemilihan segmen, dan penulisan narasi.
 - Transkripsi: tetap lewat provider Whisper-compatible seperti **Groq Whisper/OpenAI Whisper**; jangan paksa 9router untuk audio transcription.

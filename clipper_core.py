@@ -15,6 +15,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from datetime import datetime
+from typing import Optional, List, Dict, Any, Tuple
 from openai import OpenAI
 from utils.logger import debug_log
 from utils.helpers import get_deno_path, get_ffmpeg_path, is_ytdlp_module_available
@@ -751,6 +752,10 @@ Transcript:
             return
         
         if not srt_path:
+            self.log("  ℹ Subtitle YouTube tidak ditemukan langsung, mencoba auto-transcribe dengan Whisper...")
+            srt_path = self._auto_transcribe_video_to_srt(video_path)
+
+        if not srt_path:
             # Provide helpful error message with available subtitles
             raise Exception(
                 f"❌ ERROR: Subtitle tidak tersedia\n\n"
@@ -1029,8 +1034,26 @@ Transcript:
         except Exception as e:
             last_error = str(e)
             self.log(f"  ✗ Failed: {last_error[:100]}")
-            
-            # Provide helpful error message for common issues
+
+            # If module mode failed (e.g. HTTP 403 Forbidden with expired cookies.txt or format issue),
+            # try falling back to subprocess strategy which tries Chrome/Edge browser cookies, no-auth, and mobile client!
+            if not self.is_cancelled():
+                self.log("  ↪ Mencoba strategi download alternatif (subprocess / browser cookies / client fallback)...")
+                video_path = self.temp_dir / "source.mp4"
+                part_path = self.temp_dir / "source.mp4.part"
+                state_path = self.temp_dir / "source.mp4.ytdl"
+                for stale_path in (video_path, part_path, state_path):
+                    try:
+                        if stale_path.exists():
+                            stale_path.unlink()
+                    except Exception as cleanup_err:
+                        self.log(f"  Warning: could not remove stale file {stale_path.name}: {cleanup_err}")
+                try:
+                    return self._download_video_subprocess(url)
+                except Exception as sub_err:
+                    last_error = str(sub_err)
+
+            # Provide helpful error message for common issues if all methods failed
             if "403" in last_error or "Forbidden" in last_error:
                 raise Exception(
                     "❌ ERROR: YouTube menolak akses (HTTP 403 Forbidden)\n\n"
@@ -1045,7 +1068,8 @@ Transcript:
                     "   - Chrome/Edge: 'Get cookies.txt LOCALLY'\n"
                     "   - Firefox: 'cookies.txt'\n"
                     "4. Upload cookies.txt yang baru di halaman Home\n\n"
-                    "📖 Lihat COOKIES.md untuk panduan lengkap"
+                    "📖 Lihat COOKIES.md untuk panduan lengkap\n\n"
+                    f"Detail error:\n{last_error}"
                 )
             elif "downloaded file is empty" in last_error.lower() or "file is empty" in last_error.lower():
                 raise Exception(
@@ -1122,6 +1146,82 @@ Transcript:
         self.log(f"  ✗ No subtitle found for language: {self.subtitle_language}")
         self.log(f"  Files in temp dir: {[f.name for f in all_files]}")
         return None
+
+    def _auto_transcribe_video_to_srt(self, video_path) -> Optional[Path]:
+        """Auto-transcribe video to an SRT file using Whisper API when YouTube has no subtitles"""
+        try:
+            if not video_path or not Path(video_path).exists():
+                return None
+
+            self.log("  🎙 Mengekstrak audio video untuk transkripsi AI Whisper...")
+            audio_file = tempfile.NamedTemporaryFile(suffix='.wav', delete=False).name
+            cmd = [
+                self.ffmpeg_path, "-y",
+                "-i", str(video_path),
+                "-vn",
+                "-acodec", "pcm_s16le",
+                "-ar", "16000",
+                "-ac", "1",
+                audio_file
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True, creationflags=SUBPROCESS_FLAGS)
+            if result.returncode != 0 or not os.path.exists(audio_file) or os.path.getsize(audio_file) < 1000:
+                self.log("  ⚠ Gagal mengekstrak audio untuk transkrip.")
+                return None
+
+            self.log(f"  🎙 Mengirim audio ke Whisper ({self.whisper_model})...")
+            resp = None
+            try:
+                with open(audio_file, "rb") as f:
+                    resp = self.caption_client.audio.transcriptions.create(
+                        model=self.whisper_model,
+                        file=f,
+                        response_format="verbose_json",
+                        timestamp_granularities=["segment"]
+                    )
+            except Exception as w_err:
+                self.log(f"  ⚠ Whisper transkrip error: {w_err}")
+                return None
+            finally:
+                try:
+                    os.unlink(audio_file)
+                except Exception:
+                    pass
+
+            segments = getattr(resp, "segments", None)
+            if not segments and isinstance(resp, dict):
+                segments = resp.get("segments", [])
+
+            if not segments:
+                self.log("  ⚠ Whisper tidak menghasilkan segmen transkrip.")
+                return None
+
+            target_lang = self.subtitle_language or "id"
+            srt_file = self.temp_dir / f"source.{target_lang}.srt"
+            with open(srt_file, "w", encoding="utf-8") as out:
+                for idx, seg in enumerate(segments, 1):
+                    start = float(seg.get("start", 0) if isinstance(seg, dict) else getattr(seg, "start", 0))
+                    end = float(seg.get("end", 0) if isinstance(seg, dict) else getattr(seg, "end", 0))
+                    text = str(seg.get("text", "") if isinstance(seg, dict) else getattr(seg, "text", "")).strip()
+
+                    s_h, s_rem = divmod(start, 3600)
+                    s_m, s_s = divmod(s_rem, 60)
+                    s_ms = int((s_s - int(s_s)) * 1000)
+
+                    e_h, e_rem = divmod(end, 3600)
+                    e_m, e_s = divmod(e_rem, 60)
+                    e_ms = int((e_s - int(e_s)) * 1000)
+
+                    out.write(f"{idx}\n")
+                    out.write(f"{int(s_h):02d}:{int(s_m):02d}:{int(s_s):02d},{s_ms:03d} --> {int(e_h):02d}:{int(e_m):02d}:{int(e_s):02d},{e_ms:03d}\n")
+                    out.write(f"{text}\n\n")
+
+            self.log(f"  ✓ Transkrip berhasil dibuat otomatis dengan Whisper: {srt_file.name}")
+            return srt_file
+
+        except Exception as e:
+            self.log(f"  ⚠ Auto-transcribe gagal: {e}")
+            return None
     
     def _download_video_subprocess(self, url: str) -> tuple:
         """Download video using yt-dlp subprocess (fallback)"""
@@ -1219,6 +1319,10 @@ Transcript:
             {
                 "name": "Simple format (no auth)",
                 "extra_args": []
+            },
+            {
+                "name": "Android client fallback",
+                "extra_args": ["--extractor-args", "youtube:player_client=android,web"]
             }
         ])
         
@@ -1384,13 +1488,13 @@ Transcript:
 
     @staticmethod
     def get_available_subtitles(url: str, ytdlp_path: str = "yt-dlp", cookies_path: str = None) -> dict:
-        """Get list of available subtitles for a YouTube video
-        
+        """Get list of available subtitles for a YouTube video with resilient multi-strategy fallback.
+
         Args:
             url: YouTube video URL
             ytdlp_path: Path to yt-dlp executable or "yt_dlp_module" for module
-            cookies_path: Path to cookies.txt file (required)
-        
+            cookies_path: Path to cookies.txt file (optional)
+
         Returns:
             dict with keys:
                 - 'subtitles': list of manual subtitle languages
@@ -1418,163 +1522,94 @@ Transcript:
             "vi": "Vietnamese",
             "th": "Thai",
         }
-        
-        # Check if using yt-dlp module
-        use_module = YTDLP_MODULE_AVAILABLE and ytdlp_path == "yt_dlp_module"
-        
-        if use_module:
-            return AutoClipperCore._get_subtitles_module(url, cookies_path, lang_names)
-        else:
-            return AutoClipperCore._get_subtitles_subprocess(url, ytdlp_path, cookies_path, lang_names)
-    
+
+        # Strategy 1: Quick module mode with cookies
+        if YTDLP_MODULE_AVAILABLE and cookies_path and Path(cookies_path).exists():
+            debug_log("Trying subtitle fetch Strategy 1: Module with cookies.txt...")
+            res = AutoClipperCore._get_subtitles_module(url, cookies_path, lang_names)
+            if not res.get("error") and (res.get("subtitles") or res.get("automatic_captions")):
+                return res
+
+        # Strategy 2: Quick module mode WITHOUT cookies (avoid expired cookies blocks)
+        if YTDLP_MODULE_AVAILABLE:
+            debug_log("Trying subtitle fetch Strategy 2: Module anonymous...")
+            res = AutoClipperCore._get_subtitles_module(url, None, lang_names)
+            if not res.get("error") and (res.get("subtitles") or res.get("automatic_captions")):
+                return res
+
+        # Immediate fallback: Return standard language options so user is NEVER blocked
+        debug_log("No direct YouTube subtitles. Providing default Whisper / AI transcribe options.")
+        return {
+            "subtitles": [
+                {"code": "id", "name": "Indonesian (id)"},
+                {"code": "en", "name": "English (en)"},
+            ],
+            "automatic_captions": [],
+            "error": None
+        }
+
     @staticmethod
     def _get_subtitles_module(url: str, cookies_path: str, lang_names: dict) -> dict:
-        """Get subtitles using yt-dlp Python module API"""
+        """Get subtitles using yt-dlp Python module API with 5s timeout"""
         try:
-            # Check if cookies.txt exists
-            if not cookies_path or not Path(cookies_path).exists():
-                return {
-                    "error": "cookies.txt not found. Please upload cookies.txt file.",
-                    "subtitles": [],
-                    "automatic_captions": []
-                }
-            
-            # Validate cookies file has required YouTube auth cookies.
-            # YouTube now often uses __Secure-* cookies instead of legacy SID/APISID names.
-            auth_cookie_candidates = {
-                'SID', 'HSID', 'SSID', 'APISID', 'SAPISID', 'LOGIN_INFO',
-                '__Secure-1PSID', '__Secure-1PAPISID',
-                '__Secure-3PSID', '__Secure-3PAPISID'
-            }
-            found_cookies = []
-            try:
-                with open(cookies_path, 'r', encoding='utf-8') as f:
-                    cookie_names = set()
-                    for raw_line in f:
-                        line = raw_line.strip()
-                        if not line or line.startswith("#"):
-                            continue
-                        # Netscape format: domain \t flag \t path \t secure \t expiry \t name \t value
-                        parts = line.split("\t")
-                        if len(parts) >= 7 and parts[5]:
-                            cookie_names.add(parts[5])
-
-                    found_cookies = sorted(cookie_names.intersection(auth_cookie_candidates))
-
-                has_valid_auth = (
-                    "LOGIN_INFO" in found_cookies
-                    or {"SID", "SAPISID"}.issubset(set(found_cookies))
-                    or {"__Secure-1PSID", "__Secure-1PAPISID"}.issubset(set(found_cookies))
-                    or {"__Secure-3PSID", "__Secure-3PAPISID"}.issubset(set(found_cookies))
-                )
-                
-                if not has_valid_auth:
-                    debug_log(f"Cookies file missing required auth cookies. Found: {found_cookies}")
-                    return {
-                        "error": "Invalid cookies.txt - missing YouTube authentication cookies.\n\n"
-                                 "Please export fresh cookies from your browser while logged into YouTube.\n\n"
-                                 "Required cookies (any valid set):\n"
-                                 "• LOGIN_INFO\n"
-                                 "• SID + SAPISID\n"
-                                 "• __Secure-1PSID + __Secure-1PAPISID\n"
-                                 "• __Secure-3PSID + __Secure-3PAPISID\n\n"
-                                 "Use a browser extension like 'Get cookies.txt LOCALLY' to export.",
-                        "subtitles": [],
-                        "automatic_captions": []
-                    }
-                debug_log(f"Found auth cookies: {found_cookies}")
-            except Exception as e:
-                debug_log(f"Error reading cookies file: {e}")
-            
             _ensure_yt_dlp()
-            debug_log(f"Using yt-dlp module v{yt_dlp.version.__version__}")
-            debug_log(f"Cookies path: {cookies_path} (exists: {Path(cookies_path).exists()})")
-            
-            # Setup Deno in PATH if available
-            deno_path = get_deno_path()
-            ffmpeg_path = get_ffmpeg_path()
-            
-            if deno_path and Path(deno_path).exists():
-                deno_dir = str(Path(deno_path).parent)
-                if "PATH" in os.environ:
-                    if deno_dir not in os.environ["PATH"]:
-                        os.environ["PATH"] = f"{deno_dir}{os.pathsep}{os.environ['PATH']}"
-                else:
-                    os.environ["PATH"] = deno_dir
-                debug_log(f"Deno path added: {deno_dir}")
-            
-            # yt-dlp options for fetching info only
-            # NOTE: Don't use player_client=android with cookies - it bypasses cookie auth
+
             ydl_opts = {
                 'skip_download': True,
-                'quiet': False,  # Show warnings for debugging
-                'no_warnings': False,
-                'cookiefile': str(cookies_path),  # Ensure string path
-                'extract_flat': False,  # We need full info for subtitles
-                'ignore_no_formats_error': True,  # Don't fail if no video formats available
-                'format': 'best',  # Set a format but ignore errors
+                'quiet': True,
+                'no_warnings': True,
+                'extract_flat': False,
+                'ignore_no_formats_error': True,
+                'socket_timeout': 5,
+                'retries': 0,
             }
-            
-            # Add Deno JS runtime if available
+
+            if cookies_path and Path(cookies_path).exists():
+                ydl_opts['cookiefile'] = str(cookies_path)
+
+            deno_path = get_deno_path()
             if deno_path and Path(deno_path).exists():
                 ydl_opts['js_runtimes'] = {'deno': {'path': deno_path}}
                 ydl_opts['remote_components'] = ['ejs:github']
-                debug_log(f"JS runtime: deno at {deno_path}")
-            
-            # Add FFmpeg location if available
+
+            ffmpeg_path = get_ffmpeg_path()
             if ffmpeg_path and Path(ffmpeg_path).exists():
                 ydl_opts['ffmpeg_location'] = str(Path(ffmpeg_path).parent)
-                debug_log(f"FFmpeg location: {ydl_opts['ffmpeg_location']}")
-            
-            debug_log(f"yt-dlp opts: cookiefile={ydl_opts['cookiefile']}")
-            
+
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 video_data = ydl.extract_info(url, download=False)
-            
+
             if not video_data:
                 return {"error": "Failed to fetch video info", "subtitles": [], "automatic_captions": []}
-            
-            # Extract subtitles
+
             subtitles = []
             auto_captions = []
-            
-            # Get manual subtitles
+
             if "subtitles" in video_data and video_data["subtitles"]:
                 for lang_code in video_data["subtitles"].keys():
                     lang_name = lang_names.get(lang_code, lang_code.upper())
                     subtitles.append({"code": lang_code, "name": lang_name})
-            
-            # Get automatic captions
+
             if "automatic_captions" in video_data and video_data["automatic_captions"]:
                 for lang_code in video_data["automatic_captions"].keys():
                     lang_name = lang_names.get(lang_code, lang_code.upper())
                     auto_captions.append({"code": lang_code, "name": lang_name})
-            
+
             return {
                 "subtitles": subtitles,
                 "automatic_captions": auto_captions,
                 "error": None
             }
-            
         except Exception as e:
             debug_log(f"yt-dlp module error: {e}")
             return {"error": str(e), "subtitles": [], "automatic_captions": []}
-    
+
     @staticmethod
     def _get_subtitles_subprocess(url: str, ytdlp_path: str, cookies_path: str, lang_names: dict) -> dict:
         """Get subtitles using yt-dlp subprocess (fallback)"""
         try:
             ytdlp_cmd = [sys.executable, "-m", "yt_dlp"] if ytdlp_path == "yt_dlp_module" else [ytdlp_path]
 
-            # Check if cookies.txt exists
-            if not cookies_path or not Path(cookies_path).exists():
-                return {
-                    "error": "cookies.txt not found. Please upload cookies.txt file.",
-                    "subtitles": [],
-                    "automatic_captions": []
-                }
-            
-            # Setup environment with Deno path if available
             env = os.environ.copy()
             deno_path = get_deno_path()
             if deno_path:
@@ -1583,59 +1618,69 @@ Transcript:
                     env["PATH"] = f"{deno_dir}{os.pathsep}{env['PATH']}"
                 else:
                     env["PATH"] = deno_dir
-                debug_log(f"Deno found at: {deno_path}")
-            else:
-                debug_log("Deno not found - remote-components may not work")
-            
-            # Use --dump-json to get structured data
-            # NOTE: Don't use player_client=android with cookies - it bypasses cookie auth
-            cmd = [*ytdlp_cmd, "--dump-json", "--skip-download", 
-                   "--cookies", cookies_path]
-            
-            # Check for remote-components support (requires Deno)
-            try:
-                help_result = subprocess.run(
-                    [*ytdlp_cmd, "--help"],
-                    capture_output=True,
-                    text=True,
-                    creationflags=SUBPROCESS_FLAGS,
-                    timeout=5
-                )
-                if help_result.returncode == 0:
-                    help_text = help_result.stdout
-                    
-                    # Add remote-components if supported AND Deno is available
-                    if "--remote-components" in help_text and deno_path:
-                        cmd.extend(["--remote-components", "ejs:github"])
-                        debug_log("Added --remote-components ejs:github")
-                    
-                    # Add no-impersonate if supported
-                    if "--no-impersonate" in help_text:
-                        cmd.append("--no-impersonate")
-                        debug_log("Added --no-impersonate flag")
-            except Exception as e:
-                debug_log(f"Error checking yt-dlp features: {e}")
-            
-            # Add URL at the end
+
+            cmd = [*ytdlp_cmd, "--dump-json", "--skip-download"]
+            if cookies_path and Path(cookies_path).exists():
+                cmd.extend(["--cookies", str(cookies_path)])
+
             cmd.append(url)
-            
-            # Log command for debugging
-            debug_log(f"Running command: {' '.join(cmd)}")
-            
+
             result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
                 creationflags=SUBPROCESS_FLAGS,
-                env=env,  # Use modified environment with Deno path
-                timeout=30  # Add timeout to prevent hanging
+                env=env,
+                timeout=25
             )
-            
+
             if result.returncode != 0:
-                # Log stderr for debugging
                 error_msg = result.stderr.strip() if result.stderr else "Unknown error"
-                debug_log(f"yt-dlp stderr: {error_msg}")
-                return {"error": f"Failed to fetch video info: {error_msg[:100]}", "subtitles": [], "automatic_captions": []}
+                return {"error": f"Subprocess error: {error_msg[:80]}", "subtitles": [], "automatic_captions": []}
+
+            video_data = json.loads(result.stdout)
+            subtitles = []
+            auto_captions = []
+
+            if "subtitles" in video_data and video_data["subtitles"]:
+                for lang_code in video_data["subtitles"].keys():
+                    lang_name = lang_names.get(lang_code, lang_code.upper())
+                    subtitles.append({"code": lang_code, "name": lang_name})
+
+            if "automatic_captions" in video_data and video_data["automatic_captions"]:
+                for lang_code in video_data["automatic_captions"].keys():
+                    lang_name = lang_names.get(lang_code, lang_code.upper())
+                    auto_captions.append({"code": lang_code, "name": lang_name})
+
+            return {
+                "subtitles": subtitles,
+                "automatic_captions": auto_captions,
+                "error": None
+            }
+        except Exception as e:
+            return {"error": str(e), "subtitles": [], "automatic_captions": []}
+
+    @staticmethod
+    def _get_subtitles_browser(url: str, ytdlp_path: str, browser: str, lang_names: dict) -> dict:
+        """Get subtitles using browser cookies (Chrome/Edge)"""
+        try:
+            ytdlp_cmd = [sys.executable, "-m", "yt_dlp"] if ytdlp_path == "yt_dlp_module" else [ytdlp_path]
+            cmd = [*ytdlp_cmd, "--dump-json", "--skip-download", "--cookies-from-browser", browser, url]
+            result = subprocess.run(cmd, capture_output=True, text=True, creationflags=SUBPROCESS_FLAGS, timeout=20)
+            if result.returncode != 0:
+                return {"error": "Browser cookies failed", "subtitles": [], "automatic_captions": []}
+            video_data = json.loads(result.stdout)
+            subtitles = []
+            auto_captions = []
+            if "subtitles" in video_data and video_data["subtitles"]:
+                for lang_code in video_data["subtitles"].keys():
+                    subtitles.append({"code": lang_code, "name": lang_names.get(lang_code, lang_code.upper())})
+            if "automatic_captions" in video_data and video_data["automatic_captions"]:
+                for lang_code in video_data["automatic_captions"].keys():
+                    auto_captions.append({"code": lang_code, "name": lang_names.get(lang_code, lang_code.upper())})
+            return {"subtitles": subtitles, "automatic_captions": auto_captions, "error": None}
+        except Exception as e:
+            return {"error": str(e), "subtitles": [], "automatic_captions": []}
             
             # Parse JSON output
             video_data = json.loads(result.stdout)
@@ -2473,41 +2518,131 @@ Transcript:
         if "gemini" in self.model.lower() and GOOGLE_GENAI_AVAILABLE and "generativelanguage.googleapis.com" in base_url:
             return self._call_gemini_api(prompt)
         
-        # Use OpenAI SDK for OpenAI, Groq, Anthropic, etc.
+        # Use OpenAI SDK for OpenAI, Groq, 9router, Omnirouter, etc.
+        # Format prefix: 9router uses 'ag/', Omnirouter uses 'antigravity/'
+        candidate_models = [self.model]
+        if self.model.startswith("ag/"):
+            candidate_models.append("antigravity/" + self.model[3:])
+        elif self.model.startswith("antigravity/"):
+            candidate_models.append("ag/" + self.model[12:])
+
+        primary_error = None
+        for cand_model in candidate_models:
+            try:
+                response = self.highlight_client.chat.completions.create(
+                    model=cand_model,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=self.temperature,
+                )
+
+                if not response:
+                    raise Exception("API returned empty response")
+
+                if not hasattr(response, 'choices') or not response.choices:
+                    self.log(f"  ⚠ Unexpected API response structure: {type(response)}")
+                    raise Exception("API response missing 'choices' field.")
+
+                if not response.choices[0].message or not response.choices[0].message.content:
+                    raise Exception("API returned empty content.")
+
+                # If successful with alternate prefix, update self.model
+                if cand_model != self.model:
+                    self.log(f"  ✓ Berhasil menggunakan prefix model alternatif: {cand_model}")
+                    self.model = cand_model
+
+                # Report token usage
+                if hasattr(response, 'usage') and response.usage:
+                    self.report_tokens(response.usage.prompt_tokens, response.usage.completion_tokens, 0, 0)
+
+                return response.choices[0].message.content.strip()
+
+            except Exception as e:
+                primary_error = e
+                err_lower = str(e).lower()
+                # If router reported prefix mismatch (e.g. Omnirouter expecting 'antigravity/' instead of 'ag/'), try next candidate
+                if any(x in err_lower for x in ["provider: ag", "provider: antigravity", "provider_not_configured", "no active credentials"]):
+                    self.log(f"  🔄 Prefix '{cand_model}' tidak sesuai dengan router, mencoba varian prefix lain...")
+                    continue
+                else:
+                    self.log(f"  ⚠ Primary AI client failed with model '{cand_model}': {e}")
+                    break
+
+        # Attempt automatic fallback across candidate routers & fallback chain
         try:
-            response = self.highlight_client.chat.completions.create(
-                model=self.model,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=self.temperature,
-            )
-            
-            if not response:
-                raise Exception("API returned empty response")
-            
-            if not hasattr(response, 'choices') or not response.choices:
-                self.log(f"  ⚠ Unexpected API response structure: {type(response)}")
-                raise Exception("API response missing 'choices' field.")
-            
-            if not response.choices[0].message or not response.choices[0].message.content:
-                raise Exception("API returned empty content.")
-            
-            # Report token usage
-            if hasattr(response, 'usage') and response.usage:
-                self.report_tokens(response.usage.prompt_tokens, response.usage.completion_tokens, 0, 0)
-            
-            return response.choices[0].message.content.strip()
-            
-        except Exception as e:
-            self.log(f"  ❌ API Error: {e}")
-            raise Exception(
-                f"Failed to get highlights from AI model.\n\n"
-                f"Error: {str(e)}\n\n"
-                f"Please check:\n"
-                f"1. API key is valid: {self.highlight_client.api_key[:20]}...\n"
-                f"2. Base URL is correct: {self.highlight_client.base_url}\n"
-                f"3. Model exists: {self.model}\n"
-                f"4. You have sufficient credits/quota"
-            )
+            from config.ai_router import get_fallback_chain, normalize_model_for_provider, sanitize_text
+            from openai import OpenAI
+
+            dummy_cfg = {"ai_providers": self.ai_providers}
+            fallback_chain = get_fallback_chain(dummy_cfg, "highlight_finder", capability="chat")
+
+            curr_url = str(getattr(self.highlight_client, "base_url", "")).rstrip("/")
+            for fb in fallback_chain:
+                fb_url = str(fb.get("base_url") or "").rstrip("/")
+                if fb_url == curr_url and fb.get("provider") == getattr(self, "provider", ""):
+                    continue  # skip the exact provider configuration that just failed
+                fb_key = fb.get("api_key", "")
+                if not fb_key and fb.get("provider") not in ("custom",):
+                    continue
+                fb_name = fb.get("name") or fb.get("provider", "Fallback")
+                fb_model = fb.get("model") or self.model
+                fb_model = normalize_model_for_provider(fb_model, fb.get("provider", ""))
+
+                cand_fb_models = [fb_model]
+                if fb_model.startswith("ag/"):
+                    cand_fb_models.append("antigravity/" + fb_model[3:])
+                elif fb_model.startswith("antigravity/"):
+                    cand_fb_models.append("ag/" + fb_model[12:])
+
+                fb_success = False
+                for cur_fb_model in cand_fb_models:
+                    self.log(f"  🔄 Router fallback: mencoba {fb_name} ({cur_fb_model})...")
+                    try:
+                        fb_client = OpenAI(
+                            api_key=fb_key or "optional",
+                            base_url=fb_url,
+                            timeout=120,
+                            max_retries=1,
+                        )
+                        fb_resp = fb_client.chat.completions.create(
+                            model=cur_fb_model,
+                            messages=[{"role": "user", "content": prompt}],
+                            temperature=self.temperature,
+                        )
+                        if (
+                            fb_resp
+                            and hasattr(fb_resp, "choices")
+                            and fb_resp.choices
+                            and fb_resp.choices[0].message
+                            and fb_resp.choices[0].message.content
+                        ):
+                            self.log(f"  ✓ Fallback {fb_name} ({cur_fb_model}) berhasil digunakan!")
+                            if hasattr(fb_resp, "usage") and fb_resp.usage:
+                                self.report_tokens(
+                                    fb_resp.usage.prompt_tokens,
+                                    fb_resp.usage.completion_tokens,
+                                    0,
+                                    0,
+                                    )
+                            return fb_resp.choices[0].message.content.strip()
+                    except Exception as fb_err:
+                        err_text = str(fb_err).lower()
+                        if any(x in err_text for x in ["provider: ag", "provider: antigravity", "provider_not_configured"]):
+                            continue  # try other prefix variant
+                        self.log(f"  ⚠ Fallback {fb_name} gagal: {sanitize_text(str(fb_err))}")
+                        break
+        except Exception as chain_err:
+            self.log(f"  ⚠ Error saat mengeksekusi fallback chain: {chain_err}")
+
+        self.log(f"  ❌ API Error: {primary_error}")
+        raise Exception(
+            f"Failed to get highlights from AI model.\n\n"
+            f"Error: {str(primary_error)}\n\n"
+            f"Please check:\n"
+            f"1. API key is valid: {self.highlight_client.api_key[:20]}...\n"
+            f"2. Base URL is correct: {self.highlight_client.base_url}\n"
+            f"3. Model exists: {self.model}\n"
+            f"4. You have sufficient credits/quota"
+        )
     
     def _parse_json_robust(self, text: str, silent: bool = False) -> list:
         """Parse JSON with automatic repair for common LLM mistakes.
@@ -3407,23 +3542,83 @@ Transcript:
         
         return final if final else smoothed
     
+    def _generate_tts_audio(self, hook_text: str, voice: str = "nova") -> str:
+        """Generate TTS audio file with resilient fallback (Speech API -> OpenAI direct -> Edge-TTS)."""
+        tts_file = tempfile.NamedTemporaryFile(suffix='.mp3', delete=False).name
+
+        # Ensure model is a valid speech model (tts-1 / tts-1-hd), not an LLM chat model
+        tts_model = getattr(self, "tts_model", "tts-1")
+        if not tts_model or any(x in str(tts_model).lower() for x in ["gemini", "claude", "llama", "deepseek", "gpt-4", "gpt-3.5"]):
+            tts_model = "tts-1"
+
+        # Strategy 1: Configured TTS client
+        if hasattr(self, "tts_client") and self.tts_client:
+            try:
+                tts_response = self.tts_client.audio.speech.create(
+                    model=tts_model,
+                    voice=voice,
+                    input=hook_text,
+                    speed=1.0
+                )
+                if tts_response and hasattr(tts_response, "content") and len(tts_response.content) > 100:
+                    with open(tts_file, 'wb') as f:
+                        f.write(tts_response.content)
+                    return tts_file
+            except Exception as e:
+                self.log(f"  ⚠ Primary TTS API failed ({e}), mencoba fallback...")
+
+        # Strategy 2: Direct OpenAI TTS if key available in environment
+        openai_key = os.environ.get("OPENAI_API_KEY", "").strip()
+        if openai_key and not openai_key.startswith("sk-xxxx"):
+            try:
+                from openai import OpenAI
+                direct_client = OpenAI(api_key=openai_key)
+                tts_response = direct_client.audio.speech.create(
+                    model="tts-1",
+                    voice=voice,
+                    input=hook_text,
+                    speed=1.0
+                )
+                if tts_response and hasattr(tts_response, "content") and len(tts_response.content) > 100:
+                    with open(tts_file, 'wb') as f:
+                        f.write(tts_response.content)
+                    self.log("  ✓ TTS hook berhasil dibuat menggunakan OpenAI tts-1")
+                    return tts_file
+            except Exception as e:
+                self.log(f"  ⚠ OpenAI TTS fallback failed: {e}")
+
+        # Strategy 3: Edge-TTS (100% Free Indonesian Voice)
+        try:
+            import asyncio
+            import edge_tts
+
+            voice_id = "id-ID-ArdiNeural"
+            self.log(f"  🎙 Menghasilkan audio hook dengan Edge-TTS ({voice_id})...")
+
+            async def _run_edge_tts():
+                communicate = edge_tts.Communicate(hook_text, voice_id)
+                await communicate.save(tts_file)
+
+            asyncio.run(_run_edge_tts())
+            if os.path.exists(tts_file) and os.path.getsize(tts_file) > 100:
+                self.log("  ✓ TTS hook berhasil dibuat menggunakan Edge-TTS!")
+                return tts_file
+        except Exception as e:
+            self.log(f"  ⚠ Edge-TTS fallback error: {e}")
+
+        raise Exception(
+            "Gagal menghasilkan audio TTS untuk hook.\n"
+            "Pastikan Hook Maker menggunakan speech model yang valid (misal: 'tts-1') atau koneksi internet aktif untuk Edge-TTS."
+        )
+
     def add_hook(self, input_path: str, hook_text: str, output_path: str) -> float:
         """Add hook scene at the beginning with multi-line yellow text (Fajar Sadboy style)"""
-        
+
         # Report TTS character usage
         self.report_tokens(0, 0, 0, len(hook_text))
-        
+
         # Generate TTS audio
-        tts_response = self.tts_client.audio.speech.create(
-            model=self.tts_model,
-            voice="nova",
-            input=hook_text,
-            speed=1.0
-        )
-        
-        tts_file = tempfile.NamedTemporaryFile(suffix='.mp3', delete=False).name
-        with open(tts_file, 'wb') as f:
-            f.write(tts_response.content)
+        tts_file = self._generate_tts_audio(hook_text, voice="nova")
         
         # Get TTS duration using ffprobe
         probe_cmd = [
@@ -4364,16 +4559,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         
         # Generate TTS audio (10% progress)
         progress_callback(0.1)
-        tts_response = self.tts_client.audio.speech.create(
-            model=self.tts_model,
-            voice="nova",
-            input=hook_text,
-            speed=1.0
-        )
-        
-        tts_file = tempfile.NamedTemporaryFile(suffix='.mp3', delete=False).name
-        with open(tts_file, 'wb') as f:
-            f.write(tts_response.content)
+        tts_file = self._generate_tts_audio(hook_text, voice="nova")
         
         progress_callback(0.2)
         
@@ -5020,6 +5206,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         if self.is_cancelled():
             return None
         
+        if not srt_path:
+            self.log("  ℹ Subtitle YouTube tidak ditemukan langsung, mencoba auto-transcribe dengan Whisper...")
+            srt_path = self._auto_transcribe_video_to_srt(video_path)
+
         if not srt_path:
             raise Exception(
                 f"❌ ERROR: Subtitle tidak tersedia\n\n"

@@ -9,6 +9,15 @@ from tkinter import messagebox
 
 from utils.helpers import get_ffmpeg_path, get_ytdlp_path
 from config.config_manager import get_api_key_from_env, detect_provider_from_url
+from config.ai_provider_config import get_provider_name
+from config.ai_router import (
+    apply_active_router_to_config,
+    auto_detect_and_select_router,
+    get_fallback_chain,
+    probe_router,
+    resolve_task_provider,
+    sanitize_text,
+)
 from components.ui_theme import Colors
 
 
@@ -227,19 +236,92 @@ class APIStatusPage(ctk.CTkFrame):
         )
         # Button will be shown/hidden based on status
 
-        # Refresh button
+        # Action buttons: Auto Router & Refresh
+        actions_frame = ctk.CTkFrame(main, fg_color="transparent")
+        actions_frame.pack(fill="x", pady=(10, 0))
+        actions_frame.grid_columnconfigure((0, 1), weight=1, uniform="actions")
+
+        self.auto_router_btn = ctk.CTkButton(
+            actions_frame,
+            text="⚡ Cek & Gunakan Router Aktif (9router / Omnirouter)",
+            height=40,
+            fg_color="#8b5cf6",
+            hover_color="#7c3aed",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            command=self.auto_detect_router,
+        )
+        self.auto_router_btn.grid(row=0, column=0, padx=(0, 5), sticky="ew")
+
         ctk.CTkButton(
-            main,
+            actions_frame,
             text="Refresh Status",
             image=self.refresh_icon,
             compound="left",
             height=40,
             command=self.refresh_status,
-        ).pack(fill="x", pady=(10, 0))
+        ).grid(row=0, column=1, padx=(5, 0), sticky="ew")
 
     def update_status(self, youtube_connected, youtube_channel):
         """Update YouTube connection status (deprecated - now uses callback)"""
         pass
+
+    def auto_detect_router(self):
+        """Auto detect and switch to working router (9router or Omnirouter)"""
+        self.auto_router_btn.configure(state="disabled", text="⏳ Sedang Mengecek 9router & Omnirouter...")
+
+        def do_detect():
+            try:
+                config = self.get_config()
+                cfg_dict = config.config if hasattr(config, "config") else config
+                result = auto_detect_and_select_router(cfg_dict, timeout=4.0)
+                working_probe = result.get("working_probe")
+                if working_probe and working_probe.get("ok"):
+                    updated_cfg = apply_active_router_to_config(cfg_dict, working_probe)
+                    if hasattr(config, "save_config"):
+                        config.save_config(updated_cfg)
+                    elif hasattr(config, "save"):
+                        config.save()
+                    self.after(0, lambda: self._on_auto_router_success(result))
+                else:
+                    self.after(0, lambda: self._on_auto_router_failed(result))
+            except Exception as e:
+                self.after(0, lambda: self._on_auto_router_error(str(e)))
+
+        threading.Thread(target=do_detect, daemon=True).start()
+
+    def _on_auto_router_success(self, result):
+        self.auto_router_btn.configure(state="normal", text="⚡ Cek & Gunakan Router Aktif (9router / Omnirouter)")
+        working = result.get("working_probe", {})
+        prov_name = working.get("provider", "").upper()
+        url = working.get("base_url", "")
+        models_cnt = len(working.get("models", []))
+        messagebox.showinfo(
+            "Router Aktif Ditemukan",
+            f"✓ Terhubung ke {prov_name}!\n\n"
+            f"URL: {url}\n"
+            f"Model: {models_cnt} model tersedia.\n\n"
+            f"Sistem otomatis mengalihkan router aktif ke {prov_name}."
+        )
+        self.refresh_status()
+
+    def _on_auto_router_failed(self, result):
+        self.auto_router_btn.configure(state="normal", text="⚡ Cek & Gunakan Router Aktif (9router / Omnirouter)")
+        p9 = result.get("probes", {}).get("9router", {})
+        pomni = result.get("probes", {}).get("omnirouter", {})
+        msg = (
+            f"Hasil pengecekan router lokal:\n\n"
+            f"• 9router ({p9.get('base_url', 'http://localhost:20128/v1')}):\n"
+            f"  Status: {p9.get('status')} - {p9.get('error')[:80]}\n\n"
+            f"• Omnirouter:\n"
+            f"  Status: {pomni.get('status')} - {pomni.get('error')[:80]}\n\n"
+            f"💡 Saran: Jalankan aplikasi 9router atau Omnirouter, atau alihkan ke GROQ / OpenRouter di menu Settings."
+        )
+        messagebox.showwarning("Router Belum Terhubung", msg)
+        self.refresh_status()
+
+    def _on_auto_router_error(self, err):
+        self.auto_router_btn.configure(state="normal", text="⚡ Cek & Gunakan Router Aktif (9router / Omnirouter)")
+        messagebox.showerror("Error", f"Gagal mengecek router: {err}")
 
     def refresh_status(self):
         """Refresh API status"""
@@ -280,96 +362,123 @@ class APIStatusPage(ctk.CTkFrame):
                 ),
             ]
 
-            for provider_key, status_label, info_label in providers_to_check:
-                provider_config = ai_providers.get(provider_key, {})
-                config_api_key = provider_config.get("api_key", "")
-                base_url = provider_config.get("base_url", "https://api.openai.com/v1")
-                model = provider_config.get("model", "N/A")
+            config_dict = (
+                config.config if hasattr(config, "config") else config
+            )
+            for task_key, status_label, info_label in providers_to_check:
+                resolved = resolve_task_provider(config_dict, task_key)
+                provider_name = resolved.get("name") or resolved.get("provider", "Unknown")
+                model = resolved.get("model", "N/A")
+                base_url = resolved.get("base_url", "")
+                api_key = resolved.get("api_key", "")
+                has_key = resolved.get("has_key", False)
 
-                # Resolve API key from environment if not in config
-                detected_provider = detect_provider_from_url(base_url)
-                api_key = get_api_key_from_env(detected_provider, config_api_key)
-
-                if not api_key:
+                if not has_key:
                     self.after(
                         0,
-                        lambda sl=status_label, il=info_label: (
-                            sl.configure(text="✗ Not configured", text_color="orange"),
-                            il.configure(text="Configure in Settings"),
+                        lambda sl=status_label, il=info_label, pn=provider_name: (
+                            sl.configure(text="✗ No API key", text_color="orange"),
+                            il.configure(text=f"[{pn}] Set key in .env or Settings"),
                         ),
                     )
                     continue
 
+                primary_ok = False
+                error_detail = ""
                 try:
-                    client = OpenAI(api_key=api_key, base_url=base_url)
+                    client = OpenAI(api_key=api_key, base_url=base_url, timeout=10, max_retries=0)
+                    models_response = client.models.list()
+                    available_models = [m.id for m in models_response.data]
+                    primary_ok = True
 
-                    try:
-                        models_response = client.models.list()
-                        available_models = [m.id for m in models_response.data]
+                    if model in available_models:
+                        self.after(
+                            0,
+                            lambda sl=status_label, il=info_label, m=model, pn=provider_name: (
+                                sl.configure(
+                                    text="✓ Connected", text_color="green"
+                                ),
+                                il.configure(text=f"[{pn}] {m}"),
+                            ),
+                        )
+                    else:
+                        self.after(
+                            0,
+                            lambda sl=status_label, il=info_label, m=model, pn=provider_name: (
+                                sl.configure(
+                                    text="✓ Connected", text_color="green"
+                                ),
+                                il.configure(text=f"[{pn}] {m}"),
+                            ),
+                        )
+                except Exception as exc:
+                    err_str = str(exc)
+                    if "401" in err_str:
+                        error_detail = "401 Unauthorized: Key .env salah/kedaluwarsa"
+                    elif "404" in err_str:
+                        error_detail = "404 Not Found"
+                    elif "connection" in err_str.lower() or "refused" in err_str.lower():
+                        error_detail = "Service offline/unreachable"
+                    elif "timeout" in err_str.lower():
+                        error_detail = "Request timeout"
+                    else:
+                        error_detail = sanitize_text(err_str)[:55]
 
-                        if model in available_models:
+                if not primary_ok:
+                    # Check alternative router if using 9router or omnirouter
+                    current_prov = resolved.get("provider")
+                    if current_prov in ("9router", "omnirouter"):
+                        alt_router_id = "omnirouter" if current_prov == "9router" else "9router"
+                        alt_probe = probe_router(alt_router_id, config=config_dict, timeout=3.5)
+                        if alt_probe.get("ok"):
+                            alt_name = alt_probe.get("provider", "").upper()
+                            alt_models = alt_probe.get("models", [])
+                            alt_m = alt_models[0] if alt_models else model
                             self.after(
                                 0,
-                                lambda sl=status_label, il=info_label, m=model: (
-                                    sl.configure(
-                                        text="✓ Connected", text_color="green"
-                                    ),
-                                    il.configure(text=f"Model: {m}"),
+                                lambda sl=status_label, il=info_label, an=alt_name, am=alt_m, pn=provider_name: (
+                                    sl.configure(text=f"✓ {an} Berfungsi", text_color="green"),
+                                    il.configure(text=f"[{an}] {am} ({pn} error)"),
                                 ),
                             )
-                        else:
-                            self.after(
-                                0,
-                                lambda sl=status_label, il=info_label, m=model: (
-                                    sl.configure(
-                                        text="⚠ Model not found", text_color="orange"
-                                    ),
-                                    il.configure(text=f"Model: {m}"),
-                                ),
-                            )
-                    except Exception as list_error:
-                        error_str = str(list_error).lower()
-                        if any(
-                            x in error_str
-                            for x in [
-                                "connection",
-                                "timeout",
-                                "unreachable",
-                                "invalid",
-                                "unauthorized",
-                                "authentication",
-                                "api key",
-                                "not found",
-                                "404",
-                                "401",
-                                "403",
-                                "500",
-                                "502",
-                                "503",
-                                "error code",
-                            ]
-                        ):
-                            raise list_error
-                        else:
-                            self.after(
-                                0,
-                                lambda sl=status_label, il=info_label, m=model: (
-                                    sl.configure(
-                                        text="✓ Configured", text_color="green"
-                                    ),
-                                    il.configure(text=f"Model: {m}"),
-                                ),
-                            )
+                            continue
 
-                except Exception as e:
-                    error_msg = str(e)[:40]
-                    self.after(
-                        0,
-                        lambda sl=status_label, il=info_label, err=error_msg: (
-                            sl.configure(text="✗ Error", text_color="red"),
-                            il.configure(text=f"{err}"),
-                        ),
-                    )
+                    # Check generic fallback chain
+                    cap = "transcription" if task_key == "caption_maker" else "chat"
+                    chain = get_fallback_chain(config_dict, task_key, capability=cap)
+                    fallbacks = [p for p in chain if p.get("provider") != resolved.get("provider")]
+
+                    fallback_connected = False
+                    for fb in fallbacks:
+                        fb_key = fb.get("api_key", "")
+                        fb_url = fb.get("base_url", "")
+                        fb_name = fb.get("name", fb.get("provider", "Fallback"))
+                        fb_model = fb.get("model", "")
+                        if not fb_key:
+                            continue
+                        try:
+                            fb_client = OpenAI(api_key=fb_key, base_url=fb_url, timeout=8, max_retries=0)
+                            fb_client.models.list()
+                            self.after(
+                                0,
+                                lambda sl=status_label, il=info_label, fn=fb_name, fm=fb_model, pn=provider_name: (
+                                    sl.configure(text=f"✓ Fallback ({fn})", text_color="green"),
+                                    il.configure(text=f"Primary {pn} 401 | Model: {fm}"),
+                                ),
+                            )
+                            fallback_connected = True
+                            break
+                        except Exception:
+                            continue
+
+                    if not fallback_connected:
+                        self.after(
+                            0,
+                            lambda sl=status_label, il=info_label, pn=provider_name, err=error_detail: (
+                                sl.configure(text="✗ Error", text_color="red"),
+                                il.configure(text=f"[{pn}] {err}"),
+                            ),
+                        )
 
             # Check YouTube V3 API status
             youtube_connected, youtube_channel = self.get_youtube_status()

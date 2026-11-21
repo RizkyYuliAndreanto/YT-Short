@@ -42,15 +42,18 @@ class LandingPage(ctk.CTkFrame):
         create_styled_label(tagline_frame, "What would you like to create today?",
             style="heading_md", color=Colors.TEXT_SECONDARY).pack()
         
-        # Cards container - centered
-        cards_container = ctk.CTkFrame(main_container, fg_color="transparent")
-        cards_container.pack(expand=True, fill="both", padx=Spacing.XL)
-        
-        # Center the cards
-        cards_center = ctk.CTkFrame(cards_container, fg_color="transparent")
-        cards_center.place(relx=0.5, rely=0.45, anchor="center")
-        
-        # Cards grid (2x2)
+        # Cards container - scrollable so all mode cards remain reachable
+        cards_scroll = ctk.CTkScrollableFrame(
+            main_container,
+            fg_color="transparent",
+            scrollbar_button_color=Colors.BORDER,
+            scrollbar_button_hover_color=Colors.ACCENT_PRIMARY,
+        )
+        cards_scroll.pack(expand=True, fill="both", padx=Spacing.XL)
+
+        # Cards grid inside the scrollable area
+        cards_center = ctk.CTkFrame(cards_scroll, fg_color="transparent")
+        cards_center.pack(expand=True)
         self._create_cards_grid(cards_center)
         
         # Footer

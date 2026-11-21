@@ -7,6 +7,7 @@ import customtkinter as ctk
 from tkinter import messagebox
 
 from config.ai_provider_config import AI_PROVIDERS_CONFIG, get_provider_base_url
+from config.ai_router import sanitize_text
 from pages.settings.base_dialog import BaseSettingsSubPage
 from components.ui_theme import Colors
 
@@ -17,6 +18,7 @@ def get_provider_dropdown_options():
     # Priority order - most commonly used first
     priority_order = [
         "9router",
+        "omnirouter",
         "ytclip",
         "openai",
         "groq",
@@ -213,8 +215,8 @@ class BaseProviderSettingsPage(BaseSettingsSubPage):
         """Handle provider type dropdown change"""
         provider_key = get_provider_key_from_name(value)
 
-        # Show URL section only for custom provider
-        if provider_key == "custom":
+        # Show URL section for custom or omnirouter (configurable endpoint)
+        if provider_key in ("custom", "omnirouter"):
             self.url_section.pack(
                 fill="x", pady=(0, 10), after=self.content.winfo_children()[1]
             )
@@ -226,6 +228,9 @@ class BaseProviderSettingsPage(BaseSettingsSubPage):
         if base_url:
             self.url_entry.delete(0, "end")
             self.url_entry.insert(0, base_url)
+        elif provider_key == "omnirouter" and not self.url_entry.get().strip():
+            self.url_entry.delete(0, "end")
+            self.url_entry.insert(0, "http://localhost:20129/v1")
 
     def _get_provider_type_key(self):
         """Get provider type key from dropdown value"""
@@ -235,9 +240,12 @@ class BaseProviderSettingsPage(BaseSettingsSubPage):
         """Get base URL based on provider type"""
         ptype = self._get_provider_type_key()
 
-        # For custom provider, use user-entered URL
-        if ptype == "custom":
-            return self.url_entry.get().strip() or "http://localhost:8000/v1"
+        # For custom or omnirouter provider, use user-entered URL if available
+        if ptype in ("custom", "omnirouter"):
+            entered = self.url_entry.get().strip()
+            if entered:
+                return entered
+            return get_provider_base_url(ptype) or "http://localhost:8000/v1"
 
         # For known providers, use config URL
         return get_provider_base_url(ptype) or self.url_entry.get().strip()
@@ -293,9 +301,15 @@ class BaseProviderSettingsPage(BaseSettingsSubPage):
         messagebox.showerror("Error", f"Failed to load models:\n{error}")
 
     def validate_config(self):
-        """Validate provider configuration"""
+        """Validate provider configuration in a background thread to prevent UI freezing"""
         api_key = self.key_entry.get().strip()
-        model = self.model_var.get().strip()
+        if self.USE_MANUAL_INPUT:
+            model = self.model_entry.get().strip() if self.model_entry else ""
+            if not model:
+                model = self.DEFAULT_MODEL
+        else:
+            model = self.model_var.get().strip() if self.model_var else ""
+
         url = self.get_base_url()
 
         if not api_key:
@@ -303,19 +317,29 @@ class BaseProviderSettingsPage(BaseSettingsSubPage):
             return
 
         if not model or model.startswith("--"):
-            messagebox.showerror("Error", "Please select a model")
+            messagebox.showerror("Error", "Please select or enter a model")
             return
 
-        try:
-            from openai import OpenAI
+        def do_validate():
+            try:
+                from openai import OpenAI
 
-            client = OpenAI(api_key=api_key, base_url=url)
-            client.models.list()
-            messagebox.showinfo(
-                "Success", f"✓ Configuration valid!\n\nModel: {model}\nURL: {url}"
-            )
-        except Exception as e:
-            messagebox.showerror("Error", f"Validation failed:\n{str(e)}")
+                client = OpenAI(api_key=api_key, base_url=url, timeout=15, max_retries=0)
+                client.models.list()
+                self.after(
+                    0,
+                    lambda: messagebox.showinfo(
+                        "Success", f"✓ Configuration valid!\n\nModel: {model}\nURL: {url}"
+                    ),
+                )
+            except Exception as e:
+                safe_err = sanitize_text(str(e))
+                self.after(
+                    0,
+                    lambda: messagebox.showerror("Error", f"Validation failed:\n{safe_err}"),
+                )
+
+        threading.Thread(target=do_validate, daemon=True).start()
 
     def load_config(self):
         """Load config into UI"""
@@ -422,7 +446,20 @@ class BaseProviderSettingsPage(BaseSettingsSubPage):
         if "ai_providers" not in config_dict:
             config_dict["ai_providers"] = {}
 
-        provider_config = {"base_url": url, "api_key": api_key, "model": model}
+        provider_type = self._get_provider_type_key()
+        provider_config = {
+            "provider": provider_type,
+            "base_url": url,
+            "api_key": api_key,
+            "model": model,
+        }
+
+        # Also sync to ai_gateway registry
+        if "ai_gateway" in config_dict and "providers" in config_dict["ai_gateway"]:
+            gw_prov = config_dict["ai_gateway"]["providers"].setdefault(provider_type, {})
+            gw_prov["base_url"] = url
+            if api_key:
+                gw_prov["api_key"] = api_key
 
         # Save system message if textbox exists
         if self.system_message_textbox:

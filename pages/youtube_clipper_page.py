@@ -213,23 +213,23 @@ class YouTubeClipperPage(ctk.CTkFrame):
         # Subtitle dropdown
         sub_frame = ctk.CTkFrame(info_frame, fg_color="transparent")
         sub_frame.pack(fill="x", pady=(Spacing.MD, 0))
-        
+
         create_styled_label(sub_frame, "Subtitle Language:", style="caption").pack(anchor="w")
-        
+
         # Use app-level variable for compatibility
         self.subtitle_var = self.app.subtitle_var
-        # Clear variable - don't use default that doesn't exist in video
-        self.subtitle_var.set("")
-        self.subtitle_dropdown = ctk.CTkComboBox(sub_frame, values=["(loading...)"],
+        self.subtitle_var.set("id - Indonesian")
+        self.subtitle_dropdown = ctk.CTkComboBox(sub_frame, values=["id - Indonesian", "en - English"],
             variable=self.subtitle_var, fg_color=Colors.BG_SECONDARY,
             border_color=Colors.BORDER, button_color=Colors.ACCENT_PRIMARY,
             dropdown_fg_color=Colors.CARD_BG, font=Fonts.body_sm(),
-            width=200, state="disabled")
+            width=260, state="normal")
         self.subtitle_dropdown.pack(anchor="w", pady=(4, 0))
         ToolTip(self.subtitle_dropdown, "Select subtitle language for transcript extraction")
-        
-        self.subtitle_status = create_styled_label(sub_frame, "", style="caption", color=Colors.TEXT_MUTED)
+
+        self.subtitle_status = create_styled_label(sub_frame, "✓ Default: id (Indonesian)", style="caption", color=Colors.SUCCESS)
         self.subtitle_status.pack(anchor="w", pady=(4, 0))
+        self.subtitle_loaded = True
     
     def _create_settings_section(self):
         """Create clip settings section"""
@@ -512,79 +512,86 @@ class YouTubeClipperPage(ctk.CTkFrame):
     
     def _load_subtitles_via_app(self, url):
         """Delegate subtitle loading to the app's proven method"""
-        # Use the app's existing subtitle loading implementation
-        self.subtitle_status.configure(text="⏳ Loading subtitles...")
-        
+        self.subtitle_status.configure(text="⏳ Memeriksa subtitle YouTube...", text_color=Colors.TEXT_MUTED)
+        self.subtitle_loaded = True
+
         def on_subtitles_loaded(subtitles):
             """Callback when subtitles are loaded"""
             subs = []
             for sub in subtitles:
                 subs.append(f"{sub['code']} - {sub['name']}")
+            if not subs:
+                subs = ["id - Indonesian", "en - English"]
             self._update_subtitles(subs)
-        
+
         def on_error(error):
-            """Callback when subtitle loading fails"""
+            """Callback when subtitle loading encounters error - fallback to AI transcribe"""
+            fallback_subs = [
+                "id - Indonesian",
+                "en - English",
+            ]
+            self._update_subtitles(fallback_subs)
             self.subtitle_status.configure(
-                text=f"⚠ {str(error)[:40]}", text_color=Colors.WARNING)
-        
+                text="✓ Siap (Subtitle ID / Whisper Transcribe)", text_color=Colors.SUCCESS
+            )
+            self.subtitle_loaded = True
+
         # Use app's load_subtitles but with our callbacks
         def fetch():
             try:
                 from clipper_core import AutoClipperCore
                 from utils.helpers import get_app_dir
-                
+
                 app_dir = get_app_dir()
                 cookies_path = app_dir / "cookies.txt"
-                
+
                 ytdlp_path = getattr(self.app, 'ytdlp_path', 'yt_dlp_module')
                 cookies_str = str(cookies_path) if cookies_path.exists() else None
-                
+
                 result = AutoClipperCore.get_available_subtitles(
-                    url, 
-                    ytdlp_path, 
+                    url,
+                    ytdlp_path,
                     cookies_path=cookies_str
                 )
-                
-                if result.get("error"):
-                    self.after(0, lambda: on_error(result["error"]))
-                    return
-                
+
                 # Combine manual and auto-generated subtitles
                 all_subs = []
-                
+
                 for sub in result.get("subtitles", []):
                     all_subs.append({
                         "code": sub["code"],
                         "name": sub["name"]
                     })
-                
+
                 for sub in result.get("automatic_captions", []):
                     all_subs.append({
                         "code": sub["code"],
                         "name": f"{sub['name']} (auto)"
                     })
-                
+
                 if not all_subs:
-                    self.after(0, lambda: on_error("No subtitles available"))
-                    return
-                
+                    all_subs = [
+                        {"code": "id", "name": "Indonesian"},
+                        {"code": "en", "name": "English"}
+                    ]
+
                 self.after(0, lambda: on_subtitles_loaded(all_subs))
-                
+
             except Exception as e:
                 self.after(0, lambda: on_error(str(e)))
-        
+
         threading.Thread(target=fetch, daemon=True).start()
-    
+
     def _update_thumbnail(self, img):
         """Update thumbnail display"""
         self.thumb_placeholder.place_forget()
-        
+
         self.current_thumbnail = ctk.CTkImage(light_image=img, dark_image=img, size=(320, 180))
         self.thumb_label.configure(image=self.current_thumbnail)
         self.thumb_label.place(relx=0.5, rely=0.5, anchor="center")
-        
+
         self.video_title_label.configure(text="Video loaded")
-    
+
     def _reset_preview(self):
         """Reset preview to placeholder"""
         self.thumb_label.place_forget()
@@ -592,27 +599,29 @@ class YouTubeClipperPage(ctk.CTkFrame):
         self.video_title_label.configure(text="No video loaded")
         self.video_channel_label.configure(text="")
         self.video_duration_label.configure(text="")
-        self.subtitle_dropdown.configure(state="disabled", values=["(loading...)"])
-        self.subtitle_var.set("")
-        self.subtitle_status.configure(text="")
-        self.subtitle_loaded = False
-    
+        self.subtitle_dropdown.configure(state="normal", values=["id - Indonesian", "en - English"])
+        self.subtitle_var.set("id - Indonesian")
+        self.subtitle_status.configure(text="✓ Default: id (Indonesian)", text_color=Colors.SUCCESS)
+        self.subtitle_loaded = True
+
     def _update_subtitles(self, subs):
         """Update subtitle dropdown"""
         self.subtitle_dropdown.configure(state="normal", values=subs)
-        
-        # Try to select Indonesian
+
+        # Try to select Indonesian or first available
+        selected = subs[0] if subs else "id - Indonesian"
         for sub in subs:
             if sub.startswith("id"):
-                self.subtitle_var.set(sub)
+                selected = sub
                 break
-        
+        self.subtitle_var.set(selected)
+
         self.subtitle_status.configure(
-            text=f"✓ Found {len(subs)} subtitle(s)",
+            text=f"✓ Subtitle siap ({len(subs)} opsi)",
             text_color=Colors.SUCCESS
         )
         self.subtitle_loaded = True
-    
+
     def _on_rule_mode_change(self):
         """Handle rule mode toggle (free vs custom)"""
         mode = self.rule_mode_var.get()
@@ -634,16 +643,12 @@ class YouTubeClipperPage(ctk.CTkFrame):
             messagebox.showwarning("Invalid URL", "Please enter a valid YouTube URL.")
             return
 
-        # Check if subtitles are loaded
-        if not self.subtitle_loaded:
-            messagebox.showwarning("Loading", "Please wait for subtitles to finish loading.")
-            return
-
-        # Validate subtitle selection
+        # Ensure subtitle selection is ready - never block the user!
         subtitle_sel = self.subtitle_var.get().strip()
         if not subtitle_sel or subtitle_sel == "(loading...)" or " - " not in subtitle_sel:
-            messagebox.showwarning("No Subtitle", "Please select a valid subtitle language from the dropdown.")
-            return
+            self.subtitle_var.set("id - Indonesian")
+            self.subtitle_loaded = True
+            subtitle_sel = "id - Indonesian"
 
         try:
             clips = int(self.clips_var.get())

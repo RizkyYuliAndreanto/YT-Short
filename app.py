@@ -937,11 +937,6 @@ class YTShortClipperApp(ctk.CTk):
                 )
                 debug_log(f"Subtitle fetch result: {result}")
 
-                if result.get("error"):
-                    debug_log(f"Subtitle error: {result['error']}")
-                    self.after(0, lambda: self.on_subtitle_error(result["error"]))
-                    return
-
                 # Combine manual and auto-generated subtitles
                 all_subs = []
 
@@ -964,10 +959,10 @@ class YTShortClipperApp(ctk.CTk):
                 debug_log(f"Total subtitles found: {len(all_subs)}")
 
                 if not all_subs:
-                    self.after(
-                        0, lambda: self.on_subtitle_error("No subtitles available")
-                    )
-                    return
+                    all_subs = [
+                        {"code": "id", "name": "Indonesian (AI Transcribe / Whisper)", "type": "auto"},
+                        {"code": "en", "name": "English (AI Transcribe / Whisper)", "type": "auto"}
+                    ]
 
                 self.after(0, lambda: self.show_subtitle_selector(all_subs))
 

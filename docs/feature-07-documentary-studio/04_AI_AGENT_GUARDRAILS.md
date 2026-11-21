@@ -19,6 +19,7 @@ Bangun **Documentary Studio**, mode ke-7 standalone, untuk menghasilkan video do
 9. **LLM/9router hanya untuk chat/LLM tasks**; transcription tetap Whisper-compatible; TTS baseline Edge TTS, Chatterbox opsional lewat adapter.
 10. **Stock footage Pexels/Pixabay lewat API/provider adapter resmi**; API key via env/config, `base_url` default resmi dan hanya dioverride untuk proxy/mirror yang disengaja; simpan license/attribution; jangan scraping HTML bila API tersedia.
 11. **Tidak ada auto-publish/upload default.**
+12. **Source asset policy wajib dipatuhi**: jangan menjadikan channel narasi dokumenter atau channel lokal non-open-access sebagai backbone utama; utamakan sumber open-access/arsip resmi, Wikimedia/Wikipedia/Wikivideo, dan channel luar negeri yang minim watermark/clearance lebih baik; aset media sosial lokal hanya untuk klip pendek ~5–15 detik sebagai B-roll, bukan tulang punggung video.
 
 ## 3. Sebelum coding
 
@@ -66,6 +67,20 @@ Agent wajib:
   - Terapkan rate limit/backoff sederhana; cache kandidat per session untuk resume.
   - Simpan `license`, `attribution`, dan `source_page_url` untuk setiap aset stock yang dipakai.
 - Selalu validasi response LLM sebagai JSON; kalau gagal, coba repair ringan lalu retry maksimal 1–2 kali.
+
+## 6A. Aturan sourcing asset & lisensi
+
+Keputusan sourcing yang harus diimplementasikan sebagai guardrail, bukan jaminan hukum:
+
+- **Backbone video** diutamakan dari sumber yang lebih aman/terbuka: channel berita/dokumenter luar negeri bereputasi, institusi publik, arsip resmi, Wikimedia/Wikipedia/Wikivideo/Archive.org bila lisensinya eksplisit.
+- **Hindari sebagai backbone utama**: channel narasi dokumenter pada umumnya, channel clipping/reupload, dan channel lokal yang tidak jelas open-access/reuse permission.
+- **YouTube**: pilih channel dengan sinyal clearance lebih baik dan minim watermark/reupload; tetap batasi durasi kutipan yang dipakai dan catat channel/uploader.
+- **Media sosial** (Facebook/TikTok/Instagram): untuk aset lokal/third-party hanya boleh dipakai sebagai **B-roll pendek ~5–15 detik** untuk mengurangi risiko claim; jangan rakit video panjang hanya dari klip medsos. Konten harus tetap punya nilai tambah narasi/komentar.
+- **Wikimedia/Wikipedia/Wikivideo/Archive.org dan sejenisnya**: boleh mengambil excerpt lebih panjang karena lisensi cenderung eksplisit, tetapi license/attribution tetap wajib dicatat dan syarat lisensi dipatuhi.
+- **Stock footage Pexels/Pixabay** tetap jadi preferensi untuk B-roll generik karena lisensinya lebih jelas.
+- Setiap aset terpilih wajib menyimpan `source_policy`: `channel_or_account`, `platform`, `license_signal`, `intended_use` (`backbone`, `broll_short`, `licensed_archive`, `stock`), `clip_duration_seconds`, `attribution`, `review_status`.
+- LLM tidak boleh menandai konten “aman/lisensi jelas” hanya dari judul; penilaian channel/platform tetap memakai metadata, domain, dan review user.
+- Jika kandidat melanggar policy, sistem boleh menandai `policy_warning`/`rejected_by_policy`; override hanya boleh lewat persetujuan user yang eksplisit.
 
 ## 7. Aturan video/FFmpeg
 

@@ -31,6 +31,17 @@ Kriteria ini harus dipakai untuk menilai apakah fitur ke-7 sudah layak disebut s
 | AC-37 | User memilih stock candidate | Download/assemble | Aset stock tersimpan; license/attribution masuk manifest dan `data.json`. |
 | AC-38 | API key kosong/salah atau `base_url` invalid | Search stock footage | Provider ditandai gagal/nonaktif untuk session; error actionable; flow manual URL tetap berjalan. |
 
+## B3. Source asset policy & lisensi
+
+| # | Given | When | Then |
+|---|---|---|---|
+| AC-39 | Kandidat berasal dari channel narasi dokumenter/channel lokal non-open/reupload | Select clips | Sistem menandai `policy_warning` atau `rejected_by_policy`; tidak otomatis dipakai sebagai backbone tanpa override user. |
+| AC-40 | Kandidat dari channel berita/dokumenter luar negeri, institusi publik, atau arsip open-access | Select clips | Kandidat boleh diprioritaskan sebagai backbone; channel/uploader dan license signal dicatat. |
+| AC-41 | Kandidat dari Facebook/TikTok/Instagram untuk aset lokal/third-party | Select clips | Hanya boleh dipakai sebagai B-roll pendek ~5–15 detik; durasi lebih panjang ditandai melanggar policy. |
+| AC-42 | Kandidat dari Wikimedia/Wikipedia/Wikivideo/Archive.org dengan lisensi eksplisit | Select clips | Excerpt lebih panjang boleh dipakai; license/attribution wajib masuk manifest dan `data.json`. |
+| AC-43 | User override kandidat yang kena policy warning | Render | Override tercatat di session/manifest dengan status review user; tidak disembunyikan. |
+| AC-44 | Aset apa pun dipilih | Simpan artifact | `source_policy`/license/attribution minimum tersimpan per aset; LLM tidak menandai “lisensi aman” hanya dari judul. |
+
 ## C. Transcription & AI plan
 
 | # | Given | When | Then |

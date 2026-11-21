@@ -247,9 +247,18 @@ class StockFootageService:
         self.orientation = search_cfg.get("orientation", "landscape")
         self.max_per_provider = int(search_cfg.get("max_per_provider", 10) or 10)
         self.license_cfg = cfg.get("license", {}) or {}
+        self.last_errors: List[Dict[str, str]] = []
 
     def provider_status(self) -> List[Dict[str, Any]]:
-        return [p.status() for p in self.providers.values()]
+        status = []
+        for provider in self.providers.values():
+            item = provider.status()
+            errors = [e for e in self.last_errors if e.get("provider") == provider.name]
+            if errors:
+                item["last_error"] = errors[-1].get("message", "")
+                item["last_error_class"] = errors[-1].get("error_class", "provider_error")
+            status.append(item)
+        return status
 
     def available_providers(self) -> List[StockFootageProvider]:
         return [p for p in self.providers.values() if p.is_available()]
@@ -265,7 +274,23 @@ class StockFootageService:
                 continue
             try:
                 results.extend(provider.search(query, per_page=min(limit, self.max_per_provider), orientation=self.orientation))
-            except Exception:
+            except Exception as exc:
+                message = " ".join(str(exc).split())[:240]
+                lower = message.lower()
+                if "401" in lower or "403" in lower or "unauthor" in lower:
+                    error_class = "authentication"
+                elif "429" in lower or "quota" in lower or "rate" in lower:
+                    error_class = "quota"
+                elif "timeout" in lower or "timed out" in lower:
+                    error_class = "timeout"
+                else:
+                    error_class = "provider_error"
+                self.last_errors.append({
+                    "provider": name,
+                    "error_class": error_class,
+                    "message": message or "provider search failed",
+                    "query": str(query)[:160],
+                })
                 continue
         results.sort(key=lambda c: float(c.get("score", 0.0)), reverse=True)
         return results[: max(1, limit * len(wanted))]

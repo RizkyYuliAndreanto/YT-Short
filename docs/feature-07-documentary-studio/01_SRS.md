@@ -204,6 +204,18 @@ MVP/opsional:
 - Output kandidat minimal: `provider`, `id`, `title`, `duration`, `width`, `height`, `preview_url`, `download_url`, `license`, `attribution`, `source_page_url`, `query`, `score/reason`.
 - LLM hanya membuat query dan ranking; adapter yang memanggil API resmi.
 
+### 5.6 Source asset & licensing policy
+
+Documentary Studio wajib menerapkan source policy sebagai guardrail risiko, bukan jaminan hukum. Aturan inti:
+
+- Backbone video diutamakan dari sumber open-access/arsip resmi, channel berita/dokumenter luar negeri bereputasi, institusi publik, dan Wikimedia/Wikipedia/Wikivideo/Archive.org dengan lisensi eksplisit.
+- Channel narasi dokumenter, channel clipping/reupload, dan channel lokal non-open-access tidak boleh menjadi backbone utama.
+- YouTube diprioritaskan pada channel dengan sinyal clearance lebih baik dan minim watermark/reupload; durasi kutipan tetap dibatasi dan channel/uploader dicatat.
+- Aset media sosial (Facebook/TikTok/Instagram) untuk konten lokal/third-party hanya boleh menjadi B-roll pendek sekitar 5–15 detik; tidak untuk tulang punggung video panjang.
+- Wikimedia/Wikipedia/Wikivideo/Archive.org boleh memakai excerpt lebih panjang bila lisensinya eksplisit, dengan attribution/license tetap dicatat.
+- Setiap aset menyimpan `source_policy` minimal: `channel_or_account`, `platform`, `license_signal`, `intended_use`, `clip_duration_seconds`, `attribution`, `review_status`.
+- Kandidat yang melanggar policy ditandai `policy_warning`/`rejected_by_policy`; override hanya dengan persetujuan user eksplisit.
+
 ## 6. Config schema yang diusulkan
 
 Tambahkan namespace `documentary` di `config.json` melalui `ConfigManager`, backward compatible:
@@ -217,6 +229,15 @@ Tambahkan namespace `documentary` di `config.json` melalui `ConfigManager`, back
     "style": "documentary",
     "language": "id",
     "source_mode": "mixed",
+    "source_policy": {
+      "enabled": true,
+      "require_user_review": true,
+      "store_license_signal": true,
+      "backbone_preference": ["foreign_news_documentary", "official_institutions", "open_archive", "wikimedia"],
+      "avoid_as_backbone": ["narration_documentary_channels", "local_non_open_channels", "reupload_clipping_channels"],
+      "social_media_min_clip_seconds": 5,
+      "social_media_max_clip_seconds": 15
+    },
     "stock_footage": {
       "enabled": true,
       "providers": {
