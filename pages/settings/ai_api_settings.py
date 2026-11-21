@@ -329,9 +329,20 @@ class AIAPISettingsSubPage(BaseSettingsSubPage):
             if service_key not in ai_providers:
                 ai_providers[service_key] = {}
 
-            ai_providers[service_key]["provider"] = provider_key
-            ai_providers[service_key]["base_url"] = base_url
-            ai_providers[service_key]["model"] = defaults.get(service_key, "")
+            if service_key == "caption_maker" and provider_key in ("9router", "omnirouter"):
+                # 9router and Omnirouter are chat LLM gateways; use Groq Whisper for speech-to-text
+                ai_providers[service_key]["provider"] = "groq"
+                ai_providers[service_key]["base_url"] = "https://api.groq.com/openai/v1"
+                ai_providers[service_key]["model"] = "whisper-large-v3-turbo"
+            elif service_key == "hook_maker" and provider_key in ("9router", "omnirouter", "groq"):
+                # LLM gateways do not provide TTS speech synthesis; use OpenAI / Edge-TTS
+                ai_providers[service_key]["provider"] = "openai"
+                ai_providers[service_key]["base_url"] = "https://api.openai.com/v1"
+                ai_providers[service_key]["model"] = "tts-1"
+            else:
+                ai_providers[service_key]["provider"] = provider_key
+                ai_providers[service_key]["base_url"] = base_url
+                ai_providers[service_key]["model"] = defaults.get(service_key, "")
 
         # Update preferred provider in gateway
         gw = self.config.get("ai_gateway", get_default_gateway_config())

@@ -136,19 +136,30 @@ class AutoClipperCore:
             
             # Caption Maker client (Whisper)
             cm_config = self.ai_providers.get("caption_maker", {})
+            cm_base = cm_config.get("base_url") or "https://api.groq.com/openai/v1"
+            # Ensure local LLM chat proxy is not erroneously used for Whisper audio transcriptions
+            if any(host in cm_base for host in (":20128", "localhost:20129", "127.0.0.1:20128")):
+                cm_base = "https://api.groq.com/openai/v1"
             self.caption_client = OpenAI(
                 api_key=cm_config.get("api_key", ""),
-                base_url=cm_config.get("base_url", "https://api.openai.com/v1")
+                base_url=cm_base
             )
-            self.whisper_model = cm_config.get("model", "whisper-1")
-            
+            self.whisper_model = cm_config.get("model", "whisper-large-v3-turbo") or "whisper-large-v3-turbo"
+
             # Hook Maker client (TTS)
             hm_config = self.ai_providers.get("hook_maker", {})
+            hm_base = hm_config.get("base_url") or "https://api.openai.com/v1"
+            # Ensure local LLM chat proxy is not erroneously used for TTS audio synthesis
+            if any(host in hm_base for host in (":20128", "localhost:20129", "127.0.0.1:20128")):
+                hm_base = "https://api.openai.com/v1"
             self.tts_client = OpenAI(
                 api_key=hm_config.get("api_key", ""),
-                base_url=hm_config.get("base_url", "https://api.openai.com/v1")
+                base_url=hm_base
             )
-            self.tts_model = hm_config.get("model", tts_model)
+            self.tts_model = hm_config.get("model", tts_model) or "tts-1"
+            # Prevent chat LLM models (e.g. gemini/gpt-4) from being passed to TTS endpoint
+            if any(x in str(self.tts_model).lower() for x in ["gemini", "claude", "llama", "deepseek", "gpt-4"]):
+                self.tts_model = "tts-1"
         else:
             # Fallback to single client (backward compatibility)
             self.highlight_client = client
@@ -3927,8 +3938,8 @@ Transcript:
             shutil.copy(input_path, output_path)
     
     def create_ass_subtitle_capcut(self, transcript, output_path: str, time_offset: float = 0):
-        """Create ASS subtitle file with CapCut-style word-by-word highlighting"""
-        
+        """Create ASS subtitle file with CapCut-style word-by-word highlighting (supports both objects and dicts)"""
+
         # ASS header - CapCut style: white text, yellow highlight, black outline
         ass_content = """[Script Info]
 Title: Auto-generated captions
@@ -3945,63 +3956,85 @@ Style: Default,Arial Black,65,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
-        
+
         events = []
-        
-        # Check if we have word-level timestamps
+
+        # Normalize transcript data from either object attributes or dictionary keys
+        words = []
+        segments = []
         if hasattr(transcript, 'words') and transcript.words:
             words = transcript.words
-            
+        elif isinstance(transcript, dict) and transcript.get('words'):
+            words = transcript['words']
+
+        if hasattr(transcript, 'segments') and transcript.segments:
+            segments = transcript.segments
+        elif isinstance(transcript, dict) and transcript.get('segments'):
+            segments = transcript['segments']
+
+        # Check if we have word-level timestamps
+        if words:
             # Group words into chunks (3-4 words per line for readability)
             chunk_size = 4
-            
+
             for i in range(0, len(words), chunk_size):
                 chunk = words[i:i + chunk_size]
                 if not chunk:
                     continue
-                
+
                 # For each word in the chunk, create a subtitle event with that word highlighted
                 for j, current_word in enumerate(chunk):
-                    # Add time_offset to account for hook duration
-                    word_start = current_word.start + time_offset
-                    word_end = current_word.end + time_offset
-                    
+                    w_start = getattr(current_word, 'start', None) if not isinstance(current_word, dict) else current_word.get('start')
+                    w_end = getattr(current_word, 'end', None) if not isinstance(current_word, dict) else current_word.get('end')
+                    if w_start is None:
+                        w_start = 0.0
+                    if w_end is None:
+                        w_end = w_start + 0.5
+
+                    word_start = float(w_start) + time_offset
+                    word_end = float(w_end) + time_offset
+
                     # Build text with current word highlighted in yellow
                     text_parts = []
                     for k, w in enumerate(chunk):
-                        word_text = w.word.strip().upper()
+                        raw_text = getattr(w, 'word', '') if not isinstance(w, dict) else w.get('word', '')
+                        word_text = str(raw_text).strip().upper()
                         if k == j:
                             # Highlight current word (yellow: &H00FFFF in BGR)
                             text_parts.append(f"{{\\c&H00FFFF&}}{word_text}{{\\c&HFFFFFF&}}")
                         else:
                             text_parts.append(word_text)
-                    
+
                     text = " ".join(text_parts)
-                    
+
                     events.append({
                         'start': self.format_time(word_start),
                         'end': self.format_time(word_end),
                         'text': text
                     })
-        
+
         # Fallback: use segment-level timestamps if no word timestamps
-        elif hasattr(transcript, 'segments') and transcript.segments:
-            for segment in transcript.segments:
-                start = segment.get('start', 0) + time_offset
-                end = segment.get('end', 0) + time_offset
-                text = segment.get('text', '').strip().upper()
-                
+        elif segments:
+            for segment in segments:
+                s_start = getattr(segment, 'start', None) if not isinstance(segment, dict) else segment.get('start')
+                s_end = getattr(segment, 'end', None) if not isinstance(segment, dict) else segment.get('end')
+                raw_text = getattr(segment, 'text', '') if not isinstance(segment, dict) else segment.get('text', '')
+
+                start = float(s_start or 0.0) + time_offset
+                end = float(s_end or (start + 1.0)) + time_offset
+                text = str(raw_text).strip().upper()
+
                 if text:
                     events.append({
                         'start': self.format_time(start),
                         'end': self.format_time(end),
                         'text': text
                     })
-        
+
         # Write events to ASS file
         for event in events:
             ass_content += f"Dialogue: 0,{event['start']},{event['end']},Default,,0,0,0,,{event['text']}\n"
-        
+
         with open(output_path, 'w', encoding='utf-8') as f:
             f.write(ass_content)
     
@@ -4553,7 +4586,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     
     def add_hook_with_progress(self, input_path: str, hook_text: str, output_path: str, progress_callback) -> float:
         """Add hook scene at the beginning with progress tracking"""
-        
+        _ensure_cv2()
+
         # Report TTS character usage
         self.report_tokens(0, 0, 0, len(hook_text))
         
